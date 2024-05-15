@@ -1,0 +1,50 @@
+{
+    "version": 1,
+    "canisters": {
+        
+        "token": {
+          "type": "motoko",
+          "main": "src/Token.mo",
+          "args": "-v --incremental-gc"
+        },
+        "defi": {
+          "main": "src/defi/main.mo",
+          "type": "motoko",
+          "dependencies": ["ckbtc_prod"]
+        },
+        "lokbtc": {
+          "type": "motoko",
+          "main": "src/lokbtc/main.mo",
+          "args": "-v --incremental-gc",
+          "dependencies": ["ckbtc_prod"]
+        },
+
+        "pool": {
+          "main": "src/pool/main.mo",
+          "type": "motoko",
+          "dependencies": ["ckbtc_prod"]
+        },
+
+        "ckbtc_prod" : {
+          "type" : "custom",
+          "candid": "https://raw.githubusercontent.com/dfinity/ic/072b2a6586c409efa88f2244d658307ff3a645d8/rs/rosetta-api/icrc1/ledger/ledger.did",
+          "wasm": "https://download.dfinity.systems/ic/072b2a6586c409efa88f2244d658307ff3a645d8/canisters/ic-icrc1-ledger.wasm.gz",
+          "remote": {
+            "candid": "icrc1.public.did",
+            "id": {
+              "ic" : "mxzaz-hqaaa-aaaar-qaada-cai"
+            }
+          }
+        }
+    },
+    "defaults": {
+        "build": {
+            "packtool": "mops sources",
+            "args": ""
+        },
+        "replica": {
+          "subnet_type": "system"
+      }
+    }
+    
+}
