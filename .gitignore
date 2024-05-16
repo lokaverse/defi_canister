@@ -1,0 +1,7 @@
+/node_modules
+/dist
+/.dfx
+/.mops
+/.Makefile
+/.mops
+/.env

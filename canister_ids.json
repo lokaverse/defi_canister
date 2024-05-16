@@ -1,0 +1,14 @@
+{
+  "ckbtc_test": {
+    "ic": "7yg3o-piaaa-aaaak-qihxa-cai"
+  },
+  "defi": {
+    "ic": "7wewg-uyaaa-aaaak-qihwa-cai"
+  },
+  "lokbtc": {
+    "ic": "7ddhl-vqaaa-aaaak-qihvq-cai"
+  },
+  "lokbtc_test": {
+    "ic": "7rfqs-zaaaa-aaaak-qihwq-cai"
+  }
+}
