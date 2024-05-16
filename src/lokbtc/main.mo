@@ -438,6 +438,15 @@ shared ({ caller = _owner }) actor class Token(
     assert (_isAdmin(message.caller));
     sharesHash.put(address, amount);
     totalShare := totalShare_;
+    var reb_ = await rebase();
+  };
+
+  public shared (message) func clearData() : async () {
+    assert (_isAdmin(message.caller));
+    rebasedSupply := 0;
+    sharesHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    shareHash_ := []; // for upgrade
+    totalShare := 0;
   };
 
   public shared (message) func updateTotalShare(amount : Nat) : async () {

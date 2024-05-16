@@ -37,12 +37,7 @@ shared ({ caller = owner }) actor class Miner({
   private var siteAdmin : Principal = admin;
   private var lokBTC = "";
   private var totalShares = 0;
-
-  //vautls
   stable var lokaCKBTCPool : Principal = admin;
-
-  //stables
-
   private stable var usersIndex = 0;
   private stable var transactionIndex = 0;
   private stable var pause = false : Bool;
@@ -73,10 +68,35 @@ shared ({ caller = owner }) actor class Miner({
   stable var userAddressHash_ : [(Text, Nat)] = [];
   stable var userIdHash_ : [(Nat, T.User)] = [];
 
+  public shared (message) func clearData() : async () {
+    assert (_isAdmin(message.caller));
+    addLiquidityHash := HashMap.HashMap<Nat, T.Liquidity>(0, Nat.equal, Hash.hash);
+    sharesHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    transactionHash := HashMap.HashMap<Text, T.TransactionHistory>(0, Text.equal, Text.hash);
+    withdrawalHash := HashMap.HashMap<Text, T.Liquidity>(0, Text.equal, Text.hash);
+    userLiquidityHash := HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
+    userWithdrawalHash := HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
+    userAddressHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    userIdHash := HashMap.HashMap<Nat, T.User>(0, Nat.equal, Hash.hash);
+
+    totalShares := 0;
+
+    usersIndex := 0;
+    transactionIndex := 0;
+    pause := false : Bool;
+    rebaseIndex := 0;
+    liquidityIndex := 0;
+    schedulerId := 0;
+    nextTimeStamp := 0;
+    counter := 0;
+
+  };
+
   system func preupgrade() {
     userAddressHash_ := Iter.toArray(userAddressHash.entries());
     userIdHash_ := Iter.toArray(userIdHash.entries());
     addLiquidityHash_ := Iter.toArray(addLiquidityHash.entries());
+    //sharesHash_:=
 
   };
   system func postupgrade() {
@@ -171,11 +191,6 @@ shared ({ caller = owner }) actor class Miner({
 
     return n;
     //return 0;
-
-  };
-
-  public shared (message) func clearData() : async () {
-    assert (_isAdmin(message.caller));
 
   };
 
@@ -348,7 +363,7 @@ shared ({ caller = owner }) actor class Miner({
     let transferResult = await CKBTC.icrc2_transfer_from({
       from = { owner = owner_; subaccount = null };
       amount = amount_;
-      fee = null;
+      fee = ?0;
       created_at_time = null;
       from_subaccount = null;
       to = { owner = lokaCKBTCPool; subaccount = null };
@@ -388,49 +403,30 @@ shared ({ caller = owner }) actor class Miner({
     };
   };
 
-  func burnLOKBTC(owner_ : Principal, amount_ : Nat) : async T.TransferResult {
+  public shared (message) func burnTestCKBTC() : async T.TransferResult {
+    assert (_isAdmin(message.caller));
     //Debug.print("transferring from " #Principal.toText(owner_) # " by " #Principal.toText(Principal.fromActor(this)) # " " #Nat.toText(amount_));
-    let transferResult = await LOKBTC.icrc2_transfer_from({
-      from = { owner = owner_; subaccount = null };
+    var amount_ : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
+    let transferResult = await CKBTC.icrc1_transfer({
       amount = amount_;
-      fee = null;
+      fee = ?0;
       created_at_time = null;
       from_subaccount = null;
-      to = { owner = Principal.fromActor(this); subaccount = null };
-      spender_subaccount = null;
+      to = {
+        owner = Principal.fromText("mtyh3-temyy-tmbjp-ftvuq-4fn46-do3rx-kpkmx-sghhf-pfvs7-5viz5-nae");
+        subaccount = null;
+      };
       memo = null;
     });
-    //var res = 0;
+
     switch (transferResult) {
       case (#Ok(number)) {
+
         return #success(number);
       };
-      case (#Err(msg)) {
-
-        Debug.print("transfer error  ");
-        switch (msg) {
-          case (#BadFee(number)) {
-            return #error("Bad Fee");
-          };
-          case (#GenericError(number)) {
-            return #error("Generic");
-          };
-          case (#BadBurn(number)) {
-            return #error("BadBurn");
-          };
-          case (#InsufficientFunds(number)) {
-            return #error("Insufficient Funds");
-          };
-          case (#InsufficientAllowance(number)) {
-            return #error("Insufficient Allowance ");
-          };
-          case _ {
-            Debug.print("ICP err");
-          };
-        };
-        return #error("ICP transfer other error");
-      };
+      case (#Err(msg)) { return #error("error") };
     };
+
   };
 
   public shared (message) func withdrawCKBTC(amount_ : Nat) : async T.TransferRes {
@@ -438,36 +434,37 @@ shared ({ caller = owner }) actor class Miner({
 
     //check enough lokBTC
     // var lokBTCBalance : Nat = (await LOKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
-    let burnResult_ = await burnLOKBTC(message.caller, amount_);
+    switch (sharesHash.get(Principal.toText(message.caller))) {
+      case (?share) {
+        if (share >= (amount_ + 10)) {
+          //update totalshare and share to lokbtc canister
+          totalShares -= (amount_ + 10);
+          //update totalshare and share to lokbtc canister
+          await LOKBTC.updateShare(Principal.toText(message.caller), (share -(amount_ + 10)), totalShares);
+          let transferResult = await CKBTC.icrc1_transfer({
+            amount = amount_;
+            fee = ?0;
+            created_at_time = null;
+            from_subaccount = null;
+            to = { owner = message.caller; subaccount = null };
+            memo = null;
+          });
+          var res = 0;
+          switch (transferResult) {
+            case (#Ok(number)) {
 
-    //var res = 0;
-    switch (burnResult_) {
-      case (#success(number)) {
-        let transferResult = await CKBTC.icrc1_transfer({
-          amount = amount_;
-          fee = ?10;
-          created_at_time = null;
-          from_subaccount = null;
-          to = { owner = message.caller; subaccount = null };
-          memo = null;
-        });
-        var res = 0;
-        switch (transferResult) {
-          case (#Ok(number)) {
-
-            return #success(number);
+              return #success(number);
+            };
+            case (#Err(msg)) { res := 0 };
           };
-          case (#Err(msg)) { res := 0 };
         };
-        return #success(number);
       };
-      case (#error(msg)) {
-        return #error(msg);
+      case (null) {
 
       };
     };
+    return #error("error");
 
-    return #error("Other Error");
   };
 
   public query (message) func whoCall() : async Text {
