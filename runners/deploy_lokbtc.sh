@@ -7,11 +7,11 @@ set -ex
 # --- Configuration Section ---
 
 # Identity configuration. Replace '{production_identity}' with your production identity name. This identity needs to be a controller for your canister
-PRODUCTION_IDENTITY="{lokaDeployer}"
+PRODUCTION_IDENTITY="lokaDeployer"
 dfx identity use $PRODUCTION_IDENTITY
 
 # Canister identitfication - You need to create this canister either via dfx or throught the nns console
-PRODUCTION_CANISTER="{lokbtc}"
+PRODUCTION_CANISTER="lokbtc"
 
 #check your cycles. The system needs at least 2x the archiveCycles below to create the archive canister.  We suggest funding the initial canister with 4x the cycles configured in archiveCycles and then using a tool like cycle ops to monitor your cycles. You will need to add the created archive canisters(created after the first maxActiveRecords are created) to cycleops manually for it to be monitored.
 
@@ -22,7 +22,7 @@ TOKEN_NAME="LOKBTC"
 TOKEN_SYMBOL="LOKBTC"
 TOKEN_LOGO="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InJlZCIvPjwvc3ZnPg=="
 TOKEN_DECIMALS=8
-TOKEN_FEE=0
+TOKEN_FEE=100
 MAX_SUPPLY=null
 MIN_BURN_AMOUNT=0
 MAX_MEMO=64
@@ -34,32 +34,27 @@ ADMIN_PRINCIPAL=$(dfx identity get-principal)
 
 # --- Deployment Section ---
 
-dfx build --network ic lokbtc --check
-
-# Deploy the canister with the specified configuration.
-dfx canister --network ic install --mode install --wasm .dfx/ic/canisters/lokbtc/lokbtc.wasm.gz --argument "(opt record {icrc1 = opt record {
-  name = opt \"$TOKEN_NAME\";
-  symbol = opt \"$TOKEN_SYMBOL\";
-  logo = opt \"$TOKEN_LOGO\";
-  decimals = $TOKEN_DECIMALS;
-  fee = opt variant { Fixed = $TOKEN_FEE};
+dfx deploy lokbtc --argument "(opt record {icrc1 = opt record {
+  name = opt \"LOKBTC\";
+  symbol = opt \"LOKBTC\";
+  logo = opt \"data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMSIgaGVpZ2h0PSIxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InJlZCIvPjwvc3ZnPg==\";
+  decimals = 8;
+  fee = opt variant { Fixed = 100};
   minting_account = opt record{
-    owner = principal \"$ADMIN_PRINCIPAL\";
+    owner = principal \"7wewg-uyaaa-aaaak-qihwa-cai\";
     subaccount = null;
   };
-  max_supply = $MAX_SUPPLY;
-  min_burn_amount = opt $MIN_BURN_AMOUNT;
-  max_memo = opt $MAX_MEMO;
+  max_supply = null;
+  min_burn_amount = opt 0;
+  max_memo = opt 64;
   advanced_settings = null;
   metadata = null;
   fee_collector = null;
   transaction_window = null;
   permitted_drift = null;
-  max_accounts = opt $MAX_ACCOUNTS;
-  settle_to_accounts = opt $SETTLE_TO_ACCOUNTS;
 }; 
 icrc2 = opt record{
-  max_approvals_per_account = opt 10000;
+  max_approvals_per_account = opt 10000000000000000000000000;
   max_allowance = opt variant { TotalSupply = null};
   fee = opt variant { ICRC1 = null};
   advanced_settings = null;
@@ -81,7 +76,7 @@ icrc4 = opt record {
   max_balances = opt 200;
   max_transfers = opt 200;
   fee = opt variant { ICRC1 = null};
-};})" --mode reinstall
+};})" --network ic
 
 # Fetch the canister ID after deployment
 ICRC_CANISTER=$(dfx canister id lokbtc)
@@ -95,8 +90,8 @@ echo $ICRC_CANISTER
 dfx canister call lokbtc admin_init
 
 # Fetch and display various token details like name, symbol, decimals, fee, and metadata
-dfx canister call lokbtc icrc1_name  --query 
-dfx canister call lokbtc icrc1_symbol  --query 
-dfx canister call lokbtc icrc1_decimals  --query 
-dfx canister call lokbtc icrc1_fee  --query 
-dfx canister call lokbtc icrc1_metadata  --query 
+dfx canister call lokbtc --network ic icrc1_name  --query 
+dfx canister call lokbtc --network ic  icrc1_symbol  --query 
+dfx canister call lokbtc --network ic icrc1_decimals  --query 
+dfx canister call lokbtc --network ic icrc1_fee  --query 
+dfx canister call lokbtc --network ic icrc1_metadata  --query 

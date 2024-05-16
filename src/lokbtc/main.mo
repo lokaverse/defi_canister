@@ -28,7 +28,7 @@ import ICRC1 "mo:icrc1-mo/ICRC1";
 import ICRC2 "mo:icrc2-mo/ICRC2";
 import ICRC3 "mo:icrc3-mo/";
 import ICRC4 "mo:icrc4-mo/ICRC4";
-import CKBTC "canister:ckbtc_prod"; //PROD;
+import CKBTC "canister:ckbtc_test"; //PROD;
 
 shared ({ caller = _owner }) actor class Token(
   args : ?{
@@ -45,6 +45,7 @@ shared ({ caller = _owner }) actor class Token(
   private stable var lokaCKBTCPool = "";
 
   private var adminHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+  stable var adminHash_ : [(Text, Nat)] = [];
 
   let default_icrc1_args : ICRC1.InitArgs = {
     name = ?"LKBTC";
@@ -611,10 +612,12 @@ shared ({ caller = _owner }) actor class Token(
 
   system func preupgrade() {
     shareHash_ := Iter.toArray(sharesHash.entries());
+    adminHash_ := Iter.toArray(adminHash.entries());
   };
 
   system func postupgrade() {
     //re wire up the listener after upgrade
     sharesHash := HashMap.fromIter<Text, Nat>(shareHash_.vals(), 1, Text.equal, Text.hash);
+    adminHash := HashMap.fromIter<Text, Nat>(adminHash_.vals(), 1, Text.equal, Text.hash);
   };
 };

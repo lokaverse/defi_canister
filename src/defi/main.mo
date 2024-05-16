@@ -24,8 +24,9 @@ import HashMap "mo:base/HashMap";
 import { setTimer; cancelTimer; recurringTimer } = "mo:base/Timer";
 
 import T "types";
-import CKBTC "canister:ckbtc_prod"; //PROD
+//import CKBTC "canister:ckbtc_prod"; //PROD
 import LOKBTC "canister:lokbtc"; //PROD
+import CKBTC "canister:ckbtc_test"; //TEST
 
 shared ({ caller = owner }) actor class Miner({
   admin : Principal;
@@ -38,7 +39,7 @@ shared ({ caller = owner }) actor class Miner({
   private var totalShares = 0;
 
   //vautls
-  stable var lokaCKBTCVault : Principal = admin;
+  stable var lokaCKBTCPool : Principal = admin;
 
   //stables
 
@@ -48,7 +49,7 @@ shared ({ caller = owner }) actor class Miner({
   private stable var rebaseIndex = 0;
   private stable var liquidityIndex = 0;
   private stable var schedulerId = 0;
-  private stable var nextTimeStamp = 0;
+  private stable var nextTimeStamp : Int = 0;
   private stable var counter = 0;
 
   //buffers and hashmaps
@@ -83,18 +84,18 @@ shared ({ caller = owner }) actor class Miner({
     //let sched = await initScheduler();
   };
 
-  public shared (message) func getCurrentScheduler() : async Nat {
+  public query func getCurrentScheduler() : async Nat {
     return schedulerId;
   };
 
-  public query (message) func getNextRebaseHour() : async Nat {
+  public query func getNextRebaseHour() : async Int {
     return nextTimeStamp;
   };
 
   //function to check scheduler / scheduler
   //returns counter+10 each 10 seconds when waiting for night time, and only adds +1 when already active
 
-  func stopScheduler(id_ : Nat) : async Bool {
+  func stopScheduler(id_ : Nat) : Bool {
     let res = cancelTimer(id_);
     true;
   };
@@ -103,9 +104,34 @@ shared ({ caller = owner }) actor class Miner({
     nextTimeStamp := 1;
   }; */
 
-  func startScheduler() : async Nat {
+  public shared (message) func startScheduler() : async Nat {
+    assert (_isAdmin(message.caller));
     let t_ = now() / 1000000;
     await initScheduler(t_);
+  };
+
+  public shared (message) func getUserData() : async {
+    ckbtc : Nat;
+    lokbtc : Nat;
+    staked : Nat;
+  } {
+    var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
+    var lokBTCBalance : Nat = (await LOKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
+    var stakedShare = 0;
+    switch (sharesHash.get(Principal.toText(message.caller))) {
+      case (?share) {
+        stakedShare := share;
+      };
+      case (null) {
+
+      };
+    };
+    let datas = {
+      ckbtc = ckBTCBalance;
+      lokbtc = lokBTCBalance;
+      staked = stakedShare;
+    };
+    return datas;
   };
 
   func initScheduler<system>(t_ : Int) : async Nat {
@@ -114,7 +140,7 @@ shared ({ caller = owner }) actor class Miner({
     let currentTimeStamp_ = t_;
     counter := 0;
     nextTimeStamp := 0;
-    nextTimeStamp := await getNextTimeStamp(currentTimeStamp_);
+    nextTimeStamp := await getNextTimeStamp();
     Debug.print("stamp " #Int.toText(nextTimeStamp));
     if (nextTimeStamp == 0) return 0;
     schedulerId := recurringTimer(
@@ -136,14 +162,14 @@ shared ({ caller = owner }) actor class Miner({
     schedulerId;
   };
 
-  func getNextTimeStamp(tm_ : Int) : async Nat {
+  func getNextTimeStamp() : async Int {
     Debug.print("getting next timestamp");
-    let tmn_ = tm_;
-    let url = "https://api.lokamining.com/nextTimeStamp?timestamp=" #Int.toText(tmn_);
+    //let tmn_ = tm_;
+    //let url = "https://api.lokamining.com/nextTimeStamp?timestamp=" #Int.toText(tmn_);
+    var text = await send_http("https://api.dragoneyes.xyz/gts");
+    var n = Float.toInt(natToFloat(textToNat(text)));
 
-    let decoded_text = await send_http(url);
-    Debug.print(decoded_text);
-    return textToNat(decoded_text);
+    return n;
     //return 0;
 
   };
@@ -172,10 +198,10 @@ shared ({ caller = owner }) actor class Miner({
     true;
   };
 
-  public shared (message) func setCKBTCVault(vault_ : Principal) : async Principal {
+  public shared (message) func setCKBTCPool(pool_ : Text) : async Principal {
     assert (_isAdmin(message.caller));
-    lokaCKBTCVault := vault_;
-    vault_;
+    lokaCKBTCPool := Principal.fromText(pool_);
+    lokaCKBTCPool;
   };
 
   public shared (message) func setJwalletVault(vault_ : Text) : async Text {
@@ -190,11 +216,11 @@ shared ({ caller = owner }) actor class Miner({
     pause_;
   };
 
-  public query (message) func getCanisterTimeStamp() : async Int {
+  public query func getCanisterTimeStamp() : async Int {
     return now();
   };
 
-  public shared (message) func getCKBTCBalance() : async Nat {
+  public shared func getCKBTCBalance() : async Nat {
     var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
     ckBTCBalance;
   };
@@ -267,7 +293,7 @@ shared ({ caller = owner }) actor class Miner({
 
   public shared (message) func addLiquidity(amount_ : Nat) : async T.AddLiquidityResult {
     assert (_isNotPaused());
-    let transferRes_ = await transferFrom(message.caller, amount_);
+    let transferRes_ = await transferCKBTCFrom(message.caller, amount_);
     var transIndex_ = 0;
     switch transferRes_ {
       case (#success(x)) {
@@ -317,7 +343,7 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
-  func transferFrom(owner_ : Principal, amount_ : Nat) : async T.TransferResult {
+  func transferCKBTCFrom(owner_ : Principal, amount_ : Nat) : async T.TransferResult {
     //Debug.print("transferring from " #Principal.toText(owner_) # " by " #Principal.toText(Principal.fromActor(this)) # " " #Nat.toText(amount_));
     let transferResult = await CKBTC.icrc2_transfer_from({
       from = { owner = owner_; subaccount = null };
@@ -325,7 +351,7 @@ shared ({ caller = owner }) actor class Miner({
       fee = null;
       created_at_time = null;
       from_subaccount = null;
-      to = { owner = Principal.fromActor(this); subaccount = null };
+      to = { owner = lokaCKBTCPool; subaccount = null };
       spender_subaccount = null;
       memo = null;
     });
