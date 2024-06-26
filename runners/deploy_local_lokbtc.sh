@@ -76,7 +76,7 @@ icrc4 = opt record {
   max_balances = opt 200;
   max_transfers = opt 200;
   fee = opt variant { ICRC1 = null};
-};})" --network ic
+};})"
 
 # Fetch the canister ID after deployment
 ICRC_CANISTER=$(dfx canister id lokbtc)

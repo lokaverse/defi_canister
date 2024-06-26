@@ -182,6 +182,7 @@ shared ({ caller = _owner }) actor class Token(
   stable var owner = _owner;
 
   private stable var rebasedSupply = 0;
+  private stable var lastRebasedSupply = 0;
   private var sharesHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
   private stable var shareHash_ : [(Text, Nat)] = []; // for upgrade
   private stable var totalShare = 0;
@@ -191,6 +192,7 @@ shared ({ caller = _owner }) actor class Token(
   private var _icrc1 : ?ICRC1.ICRC1 = null;
 
   private func rebase() : async Nat {
+    //add update ckBTCBalance function
     var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromText(lokaCKBTCPool); subaccount = null }));
     icrc1().rebase(ckBTCBalance);
     rebasedSupply := ckBTCBalance;
@@ -428,6 +430,7 @@ shared ({ caller = _owner }) actor class Token(
   public shared query func icrc1_total_supply() : async ICRC1.Balance {
     //icrc1().total_supply();
     rebasedSupply;
+    //212;
   };
 
   public shared query func icrc1_minting_account() : async ?ICRC1.Account {

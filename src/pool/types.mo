@@ -66,6 +66,21 @@ module {
         var walletAddress : [WalletAddress];
         var bankAddress : [BankAddress];
         var transactions : [TransactionHistory];
+        var totalSharedRevenue : Nat;
+    };
+
+    public type ErrorLog = {
+        id : Nat;
+        time : Int;
+        error : Text;
+        wallet : Text;
+        time_text : Text;
+    };
+
+    public type RevenueShare = {
+        userName : Text;
+        wallet : Text;
+        sharePercent : Nat;
     };
 
     public type Miner = {
@@ -85,6 +100,8 @@ module {
         time : Int;
         hashrate : Nat;
         sats : Nat;
+        from : Text;
+        fromUsername : Text;
     };
 
     public type Distribution = {
@@ -104,12 +121,15 @@ module {
         verified : Bool;
         balance : Nat;
         totalWithdrawn : Nat;
-
+        totalReceivedSharedRevenue : Nat;
+        receivedShareList : [(Text, RevenueShare)];
         savedWalletAddress : [WalletAddress];
         bankAddress : [BankAddress];
         transactions : [TransactionHistory];
         revenueHistory : [DistributionHistory];
         yesterdayRevenue : Nat;
+        totalSharedPercent : Nat;
+        shareList : [(Text, RevenueShare)];
     };
 
     public type Timestamp = Nat64;

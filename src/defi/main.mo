@@ -26,6 +26,8 @@ import { setTimer; cancelTimer; recurringTimer } = "mo:base/Timer";
 import T "types";
 //import CKBTC "canister:ckbtc_prod"; //PROD
 import LOKBTC "canister:lokbtc"; //PROD
+import MPTS "canister:mpts"; //PROD
+import LPTS "canister:lpts"; //PROD
 import CKBTC "canister:ckbtc_test"; //TEST
 
 shared ({ caller = owner }) actor class Miner({
@@ -50,9 +52,12 @@ shared ({ caller = owner }) actor class Miner({
   //buffers and hashmaps
 
   private var addLiquidityHash = HashMap.HashMap<Nat, T.Liquidity>(0, Nat.equal, Hash.hash);
-  private var sharesHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+  private var sharesHash = HashMap.HashMap<Text, T.Shares>(0, Text.equal, Text.hash);
   private var transactionHash = HashMap.HashMap<Text, T.TransactionHistory>(0, Text.equal, Text.hash);
   private var withdrawalHash = HashMap.HashMap<Text, T.Liquidity>(0, Text.equal, Text.hash);
+  private var userClaimableCKBTCHash = HashMap.HashMap<Text, [(Nat, T.Claimable)]>(0, Text.equal, Text.hash);
+  private var userClaimableMPTSHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+  private var userClaimableLPTSHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
   private var userLiquidityHash = HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
   private var userWithdrawalHash = HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
   private var userAddressHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
@@ -61,6 +66,10 @@ shared ({ caller = owner }) actor class Miner({
 
   //upgrade temp params
   stable var addLiquidityHash_ : [(Nat, T.Liquidity)] = []; // for upgrade
+  stable var sharesHash_ : [(Text, T.Shares)] = [];
+  stable var userClaimableCKBTCHash_ : [(Text, [(Nat, T.Claimable)])] = []; // for upgrade
+  stable var userClaimableMPTSHash_ : [(Text, Nat)] = []; // for upgrade
+  stable var userClaimableLPTSHash_ : [(Text, Nat)] = []; // for upgrade
   stable var withdrawalHash_ : [(Text, T.Liquidity)] = []; // for upgrade
   stable var userLiquidityHash_ : [(Text, [Nat])] = []; // for upgrade
   stable var userWithdrawalHash_ : [(Text, [Nat])] = []; // for upgrade
@@ -68,16 +77,23 @@ shared ({ caller = owner }) actor class Miner({
   stable var userAddressHash_ : [(Text, Nat)] = [];
   stable var userIdHash_ : [(Nat, T.User)] = [];
 
-  public shared (message) func clearData() : async () {
+  public shared (message) func clearDefiData(burn : Bool) : async () {
     assert (_isAdmin(message.caller));
     addLiquidityHash := HashMap.HashMap<Nat, T.Liquidity>(0, Nat.equal, Hash.hash);
-    sharesHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    sharesHash := HashMap.HashMap<Text, T.Shares>(0, Text.equal, Text.hash);
     transactionHash := HashMap.HashMap<Text, T.TransactionHistory>(0, Text.equal, Text.hash);
     withdrawalHash := HashMap.HashMap<Text, T.Liquidity>(0, Text.equal, Text.hash);
     userLiquidityHash := HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
     userWithdrawalHash := HashMap.HashMap<Text, [Nat]>(0, Text.equal, Text.hash);
     userAddressHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
     userIdHash := HashMap.HashMap<Nat, T.User>(0, Nat.equal, Hash.hash);
+    userClaimableCKBTCHash := HashMap.HashMap<Text, [(Nat, T.Claimable)]>(0, Text.equal, Text.hash);
+    userClaimableMPTSHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    userClaimableLPTSHash := HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+
+    if (burn) var b = await burnTestCKBTC();
+
+    var a = await LOKBTC.forceRebase();
 
     totalShares := 0;
 
@@ -96,11 +112,29 @@ shared ({ caller = owner }) actor class Miner({
     userAddressHash_ := Iter.toArray(userAddressHash.entries());
     userIdHash_ := Iter.toArray(userIdHash.entries());
     addLiquidityHash_ := Iter.toArray(addLiquidityHash.entries());
+    withdrawalHash_ := Iter.toArray(withdrawalHash.entries());
+    sharesHash_ := Iter.toArray(sharesHash.entries());
+    userClaimableCKBTCHash_ := Iter.toArray(userClaimableCKBTCHash.entries());
+    userLiquidityHash_ := Iter.toArray(userLiquidityHash.entries());
+    userWithdrawalHash_ := Iter.toArray(userWithdrawalHash.entries());
+    transactionsHash_ := Iter.toArray(transactionHash.entries());
+    userClaimableMPTSHash_ := Iter.toArray(userClaimableMPTSHash.entries());
+    userClaimableLPTSHash_ := Iter.toArray(userClaimableLPTSHash.entries());
     //sharesHash_:=
 
   };
   system func postupgrade() {
-
+    userAddressHash := HashMap.fromIter<Text, Nat>(userAddressHash_.vals(), 1, Text.equal, Text.hash);
+    userIdHash := HashMap.fromIter<Nat, T.User>(userIdHash_.vals(), 1, Nat.equal, Hash.hash);
+    addLiquidityHash := HashMap.fromIter<Nat, T.Liquidity>(addLiquidityHash_.vals(), 1, Nat.equal, Hash.hash);
+    withdrawalHash := HashMap.fromIter<Text, T.Liquidity>(withdrawalHash_.vals(), 1, Text.equal, Text.hash);
+    sharesHash := HashMap.fromIter<Text, T.Shares>(sharesHash_.vals(), 1, Text.equal, Text.hash);
+    userClaimableCKBTCHash := HashMap.fromIter<Text, [(Nat, T.Claimable)]>(userClaimableCKBTCHash_.vals(), 1, Text.equal, Text.hash);
+    userLiquidityHash := HashMap.fromIter<Text, [Nat]>(userLiquidityHash_.vals(), 1, Text.equal, Text.hash);
+    userWithdrawalHash := HashMap.fromIter<Text, [Nat]>(userWithdrawalHash_.vals(), 1, Text.equal, Text.hash);
+    transactionHash := HashMap.fromIter<Text, T.TransactionHistory>(transactionsHash_.vals(), 1, Text.equal, Text.hash);
+    userClaimableMPTSHash := HashMap.fromIter<Text, Nat>(userClaimableMPTSHash_.vals(), 1, Text.equal, Text.hash);
+    userClaimableLPTSHash := HashMap.fromIter<Text, Nat>(userClaimableLPTSHash_.vals(), 1, Text.equal, Text.hash);
     //let sched = await initScheduler();
   };
 
@@ -124,23 +158,69 @@ shared ({ caller = owner }) actor class Miner({
     nextTimeStamp := 1;
   }; */
 
-  public shared (message) func startScheduler() : async Nat {
-    assert (_isAdmin(message.caller));
-    let t_ = now() / 1000000;
-    await initScheduler(t_);
+  public shared (message) func init() : async Nat {
+    1;
   };
 
   public shared (message) func getUserData() : async {
     ckbtc : Nat;
     lokbtc : Nat;
     staked : Nat;
+    mpts : Nat;
+    lpts : Nat;
+    claimableMPTS : Nat;
+    claimableLPTS : Nat;
+    //lptsDistributionHistory : Nat;
+    //mptsDistributionHistory : Nat;
+    //liquidityHistory : Nat;
+    ckBTCClaimList : [(Nat, T.Claimable)];
   } {
     var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
     var lokBTCBalance : Nat = (await LOKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
+    var mptsBalance : Nat = (await MPTS.icrc1_balance_of({ owner = message.caller; subaccount = null }));
+    var lptsBalance : Nat = (await LPTS.icrc1_balance_of({ owner = message.caller; subaccount = null }));
     var stakedShare = 0;
+    var claimList : [(Nat, T.Claimable)] = [];
+    var claimableLPTS_ = 0;
+    var claimableMPTS_ = 0;
+
+    switch (userClaimableCKBTCHash.get(Principal.toText(message.caller))) {
+
+      case (?claimable_) {
+        claimList := claimable_;
+
+      };
+      case (null) {
+
+      };
+
+    };
+    switch (userClaimableLPTSHash.get(Principal.toText(message.caller))) {
+
+      case (?claimable_) {
+        claimableLPTS_ := claimable_;
+
+      };
+      case (null) {
+
+      };
+
+    };
+    switch (userClaimableMPTSHash.get(Principal.toText(message.caller))) {
+
+      case (?claimable_) {
+        claimableMPTS_ := claimable_;
+
+      };
+      case (null) {
+
+      };
+
+    };
     switch (sharesHash.get(Principal.toText(message.caller))) {
       case (?share) {
-        stakedShare := share;
+        stakedShare := share.share;
+
       };
       case (null) {
 
@@ -150,36 +230,119 @@ shared ({ caller = owner }) actor class Miner({
       ckbtc = ckBTCBalance;
       lokbtc = lokBTCBalance;
       staked = stakedShare;
+      lpts = lptsBalance;
+      mpts = mptsBalance;
+      ckBTCClaimList = claimList;
+      claimableLPTS = claimableLPTS_;
+      claimableMPTS = claimableMPTS_;
     };
     return datas;
   };
 
-  func initScheduler<system>(t_ : Int) : async Nat {
-
-    cancelTimer(schedulerId);
-    let currentTimeStamp_ = t_;
-    counter := 0;
-    nextTimeStamp := 0;
-    nextTimeStamp := await getNextTimeStamp();
-    Debug.print("stamp " #Int.toText(nextTimeStamp));
-    if (nextTimeStamp == 0) return 0;
-    schedulerId := recurringTimer(
-      #seconds(10),
-      func() : async () {
-        if (counter < 100) { counter += 10 } else { counter := 0 };
-        let time_ = now() / 1000000;
-        if (time_ >= nextTimeStamp) {
-          counter := 200;
-
-          let res = await routine24();
-
-          //cancelTimer(schedulerId);
-          // schedulerId := scheduler();
-
+  public shared (message) func distributeLPTS(amountSat_ : Nat) : async () {
+    assert (_isAdmin(message.caller));
+    sharesHash_ := Iter.toArray(sharesHash.entries());
+    var totalLPTS = amountSat_ * 10000;
+    for (shares in sharesHash.vals()) {
+      var sharedLPTS = (shares.share * totalLPTS) / totalShares;
+      //transfer sharedLPTS to shares.walletAddress
+      switch (userClaimableLPTSHash.get(shares.walletAddress)) {
+        case (?claimable) {
+          userClaimableLPTSHash.put(shares.walletAddress, sharedLPTS + claimable);
         };
-      },
-    );
-    schedulerId;
+        case (null) {
+          userClaimableLPTSHash.put(shares.walletAddress, sharedLPTS);
+        };
+      };
+    };
+  };
+
+  public shared (message) func distributeMPTS(amountSat_ : Nat, to : Text) : async () {
+    assert (_isAdmin(message.caller));
+    var amount_ = amountSat_ * 10000;
+    switch (userClaimableMPTSHash.get(to)) {
+      case (?claimable) {
+        userClaimableMPTSHash.put(to, amount_ + claimable);
+      };
+      case (null) {
+        userClaimableMPTSHash.put(to, amount_);
+      };
+    };
+  };
+
+  public shared (message) func getMPTS() : async [(Text, Nat)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(userClaimableMPTSHash.entries());
+  };
+
+  public shared (message) func getLPTS() : async [(Text, Nat)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(userClaimableLPTSHash.entries());
+  };
+
+  public shared (message) func claimMPTS() : async T.TransferRes {
+    switch (userClaimableMPTSHash.get(Principal.toText(message.caller))) {
+      case (?claimable) {
+        let transferResult = await MPTS.icrc1_transfer({
+          amount = claimable;
+          fee = ?0;
+          created_at_time = null;
+          from_subaccount = null;
+          to = {
+            owner = message.caller;
+            subaccount = null;
+          };
+          memo = null;
+        });
+
+        switch (transferResult) {
+          case (#Ok(number)) {
+            userClaimableMPTSHash.put(Principal.toText(message.caller), 0);
+            return #success(number);
+          };
+          case (#Err(msg)) { return #error("error") };
+        };
+
+      };
+      case (null) {
+        return #error("no claimable");
+      };
+    };
+
+  };
+
+  public shared (message) func claimLPTS() : async T.TransferRes {
+    switch (userClaimableLPTSHash.get(Principal.toText(message.caller))) {
+      case (?claimable) {
+        let transferResult = await LPTS.icrc1_transfer({
+          amount = claimable;
+          fee = ?0;
+          created_at_time = null;
+          from_subaccount = null;
+          to = {
+            owner = message.caller;
+            subaccount = null;
+          };
+          memo = null;
+        });
+
+        switch (transferResult) {
+          case (#Ok(number)) {
+            userClaimableLPTSHash.put(Principal.toText(message.caller), 0);
+            return #success(number);
+          };
+          case (#Err(msg)) { return #error("error") };
+        };
+
+      };
+      case (null) {
+        return #error("no claimable");
+      };
+    };
+  };
+
+  public query (message) func getCounter() : async Nat {
+    return counter;
   };
 
   func getNextTimeStamp() : async Int {
@@ -194,13 +357,26 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
+  public shared (message) func getTime() : async Bool {
+    var a = await getNextTimeStamp();
+    var tm = now() / 1000000;
+    return a > tm;
+
+  };
+
   public shared (message) func setLOKBTC(address : Text) : async () {
     assert (_isAdmin(message.caller));
     lokBTC := address;
   };
+  private stable var poolCanister = "";
+
+  public shared (message) func setPoolCanister(address : Text) : async () {
+    assert (_isAdmin(message.caller));
+    poolCanister := address;
+  };
 
   func _isAdmin(p : Principal) : Bool {
-    return (p == siteAdmin);
+    return (p == siteAdmin or p == Principal.fromText(poolCanister));
   };
 
   func _isNotPaused() : Bool {
@@ -314,13 +490,22 @@ shared ({ caller = owner }) actor class Miner({
       case (#success(x)) {
         totalShares += amount_;
         var updatedShare = amount_;
+
         switch (sharesHash.get(Principal.toText(message.caller))) {
           case (?currentShare) {
-            sharesHash.put(Principal.toText(message.caller), currentShare + amount_);
-            updatedShare := currentShare + amount_;
+            var shr = {
+              walletAddress = Principal.toText(message.caller);
+              share = currentShare.share + amount_;
+            };
+            sharesHash.put(Principal.toText(message.caller), shr);
+            updatedShare := currentShare.share + amount_;
           };
           case (null) {
-            sharesHash.put(Principal.toText(message.caller), amount_);
+            var shr = {
+              walletAddress = Principal.toText(message.caller);
+              share = amount_;
+            };
+            sharesHash.put(Principal.toText(message.caller), shr);
           };
         };
 
@@ -403,8 +588,8 @@ shared ({ caller = owner }) actor class Miner({
     };
   };
 
-  public shared (message) func burnTestCKBTC() : async T.TransferResult {
-    assert (_isAdmin(message.caller));
+  func burnTestCKBTC() : async T.TransferResult {
+    //assert (_isAdmin(message.caller));
     //Debug.print("transferring from " #Principal.toText(owner_) # " by " #Principal.toText(Principal.fromActor(this)) # " " #Nat.toText(amount_));
     var amount_ : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
     let transferResult = await CKBTC.icrc1_transfer({
@@ -429,34 +614,93 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
-  public shared (message) func withdrawCKBTC(amount_ : Nat) : async T.TransferRes {
-    assert (_isNotPaused());
+  public shared (message) func claimCKBTC(id_ : Nat) : async T.TransferRes {
+    switch (userClaimableCKBTCHash.get(Principal.toText(message.caller))) {
 
+      case (?claimable_) {
+        var detailedHash = HashMap.fromIter<Nat, T.Claimable>(claimable_.vals(), 1, Nat.equal, Hash.hash);
+        switch (detailedHash.get(id_)) {
+          case (?claimData) {
+            let transferResult = await CKBTC.icrc1_transfer({
+              amount = claimData.amount;
+              fee = ?0;
+              created_at_time = null;
+              from_subaccount = null;
+              to = { owner = message.caller; subaccount = null };
+              memo = null;
+            });
+
+            switch (transferResult) {
+              case (#Ok(number)) {
+                detailedHash.delete(id_);
+                var detailedHashArray = Iter.toArray(detailedHash.entries());
+                userClaimableCKBTCHash.put(Principal.toText(message.caller), detailedHashArray);
+                return #success(number);
+              };
+              case (#Err(msg)) { #error("transfer error") };
+            };
+
+          };
+          case (null) {
+            return #error("claim id not found");
+          };
+
+        };
+
+      };
+      case (null) {
+        return #error("user claim not found");
+      };
+
+    };
+
+  };
+
+  private stable var claimCKBTCId = 0;
+  public shared (message) func requestRedeem(amount_ : Nat) : async {
+    #success : T.Claimable;
+    #error : Text;
+  } {
+    assert (_isNotPaused());
+    var timeRedeem = now() / 1000000 + (1000 * 60 * 60 * 24);
     //check enough lokBTC
     // var lokBTCBalance : Nat = (await LOKBTC.icrc1_balance_of({ owner = message.caller; subaccount = null }));
     switch (sharesHash.get(Principal.toText(message.caller))) {
       case (?share) {
-        if (share >= (amount_ + 10)) {
+        if (share.share >= (amount_ + 10)) {
           //update totalshare and share to lokbtc canister
           totalShares -= (amount_ + 10);
-          //update totalshare and share to lokbtc canister
-          await LOKBTC.updateShare(Principal.toText(message.caller), (share -(amount_ + 10)), totalShares);
-          let transferResult = await CKBTC.icrc1_transfer({
-            amount = amount_;
-            fee = ?0;
-            created_at_time = null;
-            from_subaccount = null;
-            to = { owner = message.caller; subaccount = null };
-            memo = null;
-          });
-          var res = 0;
-          switch (transferResult) {
-            case (#Ok(number)) {
-
-              return #success(number);
-            };
-            case (#Err(msg)) { res := 0 };
+          var shr = {
+            walletAddress = Principal.toText(message.caller);
+            share = share.share - amount_;
           };
+          sharesHash.put(Principal.toText(message.caller), shr);
+          //update totalshare and share to lokbtc canister
+          await LOKBTC.updateShare(Principal.toText(message.caller), (share.share -(amount_ + 10)), totalShares);
+          var claimObject = {
+            id = claimCKBTCId;
+            amount = amount_;
+            time = timeRedeem;
+          };
+
+          switch (userClaimableCKBTCHash.get(Principal.toText(message.caller))) {
+            case (?claimable_) {
+              var detailedHash = HashMap.fromIter<Nat, T.Claimable>(claimable_.vals(), 1, Nat.equal, Hash.hash);
+              detailedHash.put(claimCKBTCId, claimObject);
+              var detailedHashArray = Iter.toArray(detailedHash.entries());
+              userClaimableCKBTCHash.put(Principal.toText(message.caller), detailedHashArray);
+            };
+            case (null) {
+              var detailedHash = HashMap.HashMap<Nat, T.Claimable>(0, Nat.equal, Hash.hash);
+              detailedHash.put(claimCKBTCId, claimObject);
+              var detailedHashArray = Iter.toArray(detailedHash.entries());
+              userClaimableCKBTCHash.put(Principal.toText(message.caller), detailedHashArray);
+            };
+
+          };
+          claimCKBTCId += 1;
+          return #success(claimObject);
+
         };
       };
       case (null) {
@@ -514,34 +758,6 @@ shared ({ caller = owner }) actor class Miner({
     return amountFloat_;
   };
 
-  /*public query (message) func getMinerP() : async Text {
-
-    var miner_id : Nat = 0;
-    let emptyMiner = {
-      id = 0;
-      walletAddress = siteAdmin;
-      var username = "<empty>";
-      hashrate = 0;
-    };
-    let miner_ = minerHash.get(Principal.toText(message.caller));
-    switch (miner_) {
-      case (?m) {
-        return "miner found";
-      };
-      case (null) {
-        "Null";
-      };
-    };
-  }; */
-
-  public query (message) func fetchUserByPrincipal(p : Principal) : async () {
-
-  };
-
-  public query (message) func fetchUserById(p : Nat) : async () {
-
-  };
-
   func textToFloat(t : Text) : Float {
 
     var i : Float = 1;
@@ -575,15 +791,12 @@ shared ({ caller = owner }) actor class Miner({
     return f;
   };
 
-  //@DEV- CORE FUNCTIONS TO CALCULATE 24 HOUR HASHRATE REWARD AND DISTRIBUTE IT PROPORTIONALLLY TO ALL MINERS
-  // public shared(message) func routine24() : async Text {
-  //"https://btc.lokamining.com:8443/v1/transaction/earnings"
-  private func routine24() : async Text {
-    "";
-  };
+  //@DEV- CORE FUNCTIONS TO CALL LOKBTC TO REBASE BALANCE ONCE THERE IS NEW BTC MINED
 
-  public shared (message) func routine24Force() : async Text {
-    "";
+  public shared (message) func rebaseLOKBTC() : async Text {
+    assert (_isAdmin(message.caller));
+    var a = await LOKBTC.forceRebase();
+    Nat.toText(a);
   };
 
   func textSplit(word_ : Text, delimiter_ : Char) : [Text] {
