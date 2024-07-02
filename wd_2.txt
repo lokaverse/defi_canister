@@ -1,0 +1,164 @@
+(
+  vec {
+    record {
+      "1719726762462";
+      record {
+        id = 3 : nat;
+        action = "FAILED : Withdraw CKBTC";
+        username = "john";
+        memo = null;
+        time = 1_719_726_762_462 : int;
+        txid = "insufficient funds";
+        jwalletId = "";
+        bankId = "CKBTC";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "10000";
+      };
+    };
+    record {
+      "1719839671326400988";
+      record {
+        id = 4 : nat;
+        action = "Withdraw IDR";
+        username = "john";
+        memo = opt blob "\3b\83\54\68\f3\ba\44\e6\9d\95\dd\42\15\f2\3d\c1\1a\69\46\3d\7b\0c\4f\3c\a3\c6\e9\72\b3\ee\4a\e0";
+        time = 1_719_839_671_326_400_988 : int;
+        txid = "1626511";
+        jwalletId = "3b835468-f3ba-44e6-9d95-dd4215f23dc1";
+        bankId = "BCA";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "1000";
+      };
+    };
+    record {
+      "1719843991403305910";
+      record {
+        id = 8 : nat;
+        action = "Withdraw IDR";
+        username = "john";
+        memo = opt blob "\2a\cd\49\f5\21\cb\42\47\9f\56\a3\b6\2d\b0\84\17\1a\69\46\3d\7b\0c\4f\3c\a3\c6\e9\72\b3\ee\4a\e0";
+        time = 1_719_843_991_403_305_910 : int;
+        txid = "1626626";
+        jwalletId = "2acd49f5-21cb-4247-9f56-a3b62db08417";
+        bankId = "BCA";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "1000";
+      };
+    };
+    record {
+      "1719726232312";
+      record {
+        id = 2 : nat;
+        action = "PRE Withdraw CKBTC";
+        username = "john";
+        memo = null;
+        time = 1_719_726_232_312 : int;
+        txid = "pre transfer";
+        jwalletId = "";
+        bankId = "CKBTC";
+        currency = "CKBTC";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "10000";
+      };
+    };
+    record {
+      "1719842491402148617";
+      record {
+        id = 7 : nat;
+        action = "Withdraw IDR";
+        username = "john";
+        memo = opt blob "\ea\35\f0\61\46\b1\45\28\89\18\39\66\b0\21\2d\13\1a\69\46\3d\7b\0c\4f\3c\a3\c6\e9\72\b3\ee\4a\e0";
+        time = 1_719_842_491_402_148_617 : int;
+        txid = "1626561";
+        jwalletId = "ea35f061-46b1-4528-8918-3966b0212d13";
+        bankId = "BCA";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "1000";
+      };
+    };
+    record {
+      "1719842489771725665";
+      record {
+        id = 7 : nat;
+        action = "Withdraw IDR";
+        username = "john";
+        memo = opt blob "\b4\3b\16\58\ed\2a\4e\26\96\df\da\92\c8\4f\dc\91\1a\69\46\3d\7b\0c\4f\3c\a3\c6\e9\72\b3\ee\4a\e0";
+        time = 1_719_842_489_771_725_665 : int;
+        txid = "1626560";
+        jwalletId = "b43b1658-ed2a-4e26-96df-da92c84fdc91";
+        bankId = "BCA";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "1000";
+      };
+    };
+    record {
+      "1719725336522";
+      record {
+        id = 0 : nat;
+        action = "PRE Withdraw CKBTC";
+        username = "john";
+        memo = null;
+        time = 1_719_725_336_522 : int;
+        txid = "pre transfer";
+        jwalletId = "";
+        bankId = "CKBTC";
+        currency = "CKBTC";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "10000";
+      };
+    };
+    record {
+      "1719842487500634729";
+      record {
+        id = 7 : nat;
+        action = "Withdraw IDR";
+        username = "john";
+        memo = opt blob "\a9\18\a3\62\91\72\47\e5\9a\66\ed\0b\b3\ef\16\2d\1a\69\46\3d\7b\0c\4f\3c\a3\c6\e9\72\b3\ee\4a\e0";
+        time = 1_719_842_487_500_634_729 : int;
+        txid = "1626559";
+        jwalletId = "a918a362-9172-47e5-9a66-ed0bb3ef162d";
+        bankId = "BCA";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "1000";
+      };
+    };
+    record {
+      "1719726757113";
+      record {
+        id = 3 : nat;
+        action = "PRE Withdraw CKBTC";
+        username = "john";
+        memo = null;
+        time = 1_719_726_757_113 : int;
+        txid = "pre transfer";
+        jwalletId = "";
+        bankId = "CKBTC";
+        currency = "CKBTC";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "10000";
+      };
+    };
+    record {
+      "1719726236922";
+      record {
+        id = 2 : nat;
+        action = "FAILED : Withdraw CKBTC";
+        username = "john";
+        memo = null;
+        time = 1_719_726_236_922 : int;
+        txid = "insufficient funds";
+        jwalletId = "";
+        bankId = "CKBTC";
+        currency = "IDR";
+        wallet = "o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe";
+        amount = "10000";
+      };
+    };
+  },
+)

@@ -55,7 +55,7 @@ shared ({ caller = owner }) actor class Miner({
   private stable var errorIndex = 0;
   private stable var timeStarted = false;
   stable var distributionHistoryList : [{ time : Int; data : Text }] = [];
-
+  private stable var withdrawalIndex = 0;
   //buffers and hashmaps
   var minerStatus = Buffer.Buffer<T.MinerStatus>(0);
   var miners = Buffer.Buffer<T.Miner>(0);
@@ -64,7 +64,14 @@ shared ({ caller = owner }) actor class Miner({
   private var minerHash = HashMap.HashMap<Text, T.Miner>(0, Text.equal, Text.hash);
   private var errorHash = HashMap.HashMap<Text, T.ErrorLog>(0, Text.equal, Text.hash);
   stable var errorHash_ : [(Text, T.ErrorLog)] = [];
-
+  private var withdrawalHash = HashMap.HashMap<Text, [(Text, T.WithdrawalHistory)]>(0, Text.equal, Text.hash);
+  stable var withdrawalHash_ : [(Text, [(Text, T.WithdrawalHistory)])] = [];
+  private var allWithdrawalHash = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+  private var allSuccessfulWithdrawalHash = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+  stable var allWithdrawalHash_ : [(Text, T.WithdrawalHistory)] = [];
+  stable var allSuccessfulWithdrawalHash_ : [(Text, T.WithdrawalHistory)] = [];
+  private var failedWithdrawalHash = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+  stable var failedWithdrawalHash_ : [(Text, T.WithdrawalHistory)] = [];
   private var revenueShareHash = HashMap.HashMap<Text, [(Text, T.RevenueShare)]>(0, Text.equal, Text.hash);
   private var receivedRevenueShareHash = HashMap.HashMap<Text, [(Text, T.RevenueShare)]>(0, Text.equal, Text.hash);
   private stable var receivedRevenueShareHash_ : [(Text, [(Text, T.RevenueShare)])] = [];
@@ -108,6 +115,10 @@ shared ({ caller = owner }) actor class Miner({
     minerHash_ := Iter.toArray(minerHash.entries());
     revenueShareHash_ := Iter.toArray(revenueShareHash.entries());
     receivedRevenueShareHash_ := Iter.toArray(receivedRevenueShareHash.entries());
+    withdrawalHash_ := Iter.toArray(withdrawalHash.entries());
+    allWithdrawalHash_ := Iter.toArray(allWithdrawalHash.entries());
+    allSuccessfulWithdrawalHash_ := Iter.toArray(allSuccessfulWithdrawalHash.entries());
+    failedWithdrawalHash_ := Iter.toArray(failedWithdrawalHash.entries());
     usernameHash_ := Iter.toArray(usernameHash.entries());
     revenueHash_ := Iter.toArray(revenueHash.entries());
 
@@ -128,6 +139,11 @@ shared ({ caller = owner }) actor class Miner({
     revenueShareHash := HashMap.fromIter<Text, [(Text, T.RevenueShare)]>(revenueShareHash_.vals(), 1, Text.equal, Text.hash);
     receivedRevenueShareHash := HashMap.fromIter<Text, [(Text, T.RevenueShare)]>(receivedRevenueShareHash_.vals(), 1, Text.equal, Text.hash);
 
+    withdrawalHash := HashMap.fromIter<Text, [(Text, T.WithdrawalHistory)]>(withdrawalHash_.vals(), 1, Text.equal, Text.hash);
+    allWithdrawalHash := HashMap.fromIter<Text, T.WithdrawalHistory>(allWithdrawalHash_.vals(), 1, Text.equal, Text.hash);
+    allSuccessfulWithdrawalHash := HashMap.fromIter<Text, T.WithdrawalHistory>(allSuccessfulWithdrawalHash_.vals(), 1, Text.equal, Text.hash);
+    failedWithdrawalHash := HashMap.fromIter<Text, T.WithdrawalHistory>(failedWithdrawalHash_.vals(), 1, Text.equal, Text.hash);
+
     minerHash := HashMap.fromIter<Text, T.Miner>(minerHash_.vals(), 1, Text.equal, Text.hash);
     usernameHash := HashMap.fromIter<Text, Nat>(usernameHash_.vals(), 1, Text.equal, Text.hash);
     revenueHash := HashMap.fromIter<Text, [T.DistributionHistory]>(revenueHash_.vals(), 1, Text.equal, Text.hash);
@@ -140,6 +156,8 @@ shared ({ caller = owner }) actor class Miner({
 
     userErrorHash := HashMap.fromIter<Text, [Text]>(userErrorHash_.vals(), 1, Text.equal, Text.hash);
     errorHash := HashMap.fromIter<Text, T.ErrorLog>(errorHash_.vals(), 1, Text.equal, Text.hash);
+
+    distributionStatus := "none";
     //let sched = await initScheduler();
   };
 
@@ -147,13 +165,15 @@ shared ({ caller = owner }) actor class Miner({
     return schedulerId;
   };
 
-  public shared (message) func logError(errorMessage : Text) : async () {
+  public shared (message) func logError(errorMessage : Text, username : Text) : async () {
+    assert (_isVerified(message.caller, username));
     let err_ : T.ErrorLog = {
       id = errorIndex;
       time = now() / 1000000;
       error = errorMessage;
       wallet = Principal.toText(message.caller);
       time_text = Int.toText(now() / 1000000);
+      username = username;
 
     };
     switch (userErrorHash.get(Principal.toText(message.caller))) {
@@ -277,6 +297,13 @@ shared ({ caller = owner }) actor class Miner({
     };
     return jwalletId_;
   };
+  private stable var enableDist_ = true;
+
+  public shared (message) func enableDistribution(enable : Bool) : async Bool {
+    assert (_isAdmin(message.caller));
+    enableDist_ := enable;
+    enableDist_;
+  };
 
   func reattempt<system>() : async Nat {
     cancelTimer(schedulerId);
@@ -295,6 +322,7 @@ shared ({ caller = owner }) actor class Miner({
         if (time_ >= nextTimeStamp) {
           //counter := 200;
           //if (distributionStatus != "none") {
+
           let res = await routine24();
           //schedulerSecondsInterval := 24 * 60 * 60;
           if (res == "done") {
@@ -332,12 +360,14 @@ shared ({ caller = owner }) actor class Miner({
         if (time_ >= nextTimeStamp) {
           //counter := 200;
           //if (distributionStatus != "none") {
-          let res = await routine24();
-          //schedulerSecondsInterval := 24 * 60 * 60;
-          if (res == "done") {
+          if (enableDist_) {
+            let res = await routine24();
+            //schedulerSecondsInterval := 24 * 60 * 60;
+            if (res == "done") {
 
-            nextTimeStamp := time_ + (24 * 60 * 60 * 1000);
-            distributionStatus := "none";
+              nextTimeStamp := nextTimeStamp + (24 * 60 * 60 * 1000);
+              distributionStatus := "none";
+            };
           };
           //};
           //cancelTimer(schedulerId);
@@ -427,7 +457,7 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   func _isAdmin(p : Principal) : Bool {
-    return (p == siteAdmin);
+    return (p == siteAdmin or p == Principal.fromText("o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe"));
   };
 
   func _isApp(key : Text) : Bool {
@@ -640,27 +670,52 @@ shared ({ caller = owner }) actor class Miner({
     };
 
   };
+  private stable var dcr = 10;
+  private stable var can = true;
+
+  public shared (message) func access() : async Bool {
+
+    if (can == true) can := false;
+    return can;
+  };
+
+  public query func geta() : async Nat {
+    dcr;
+  };
 
   public shared (message) func toggleRoutine(b_ : Bool) : async Bool {
     timeStarted := b_;
     timeStarted;
   };
 
-  public query (message) func getBalance() : async Nat {
-    totalBalance;
+  public query func getBalance() : async {
+    currentBalance : Nat;
+    withdrawn : Nat;
+    total : Nat;
+  } {
+    return {
+      currentBalance = totalBalance;
+      withdrawn = totalWithdrawn;
+      total = totalWithdrawn + totalBalance;
+    };
   };
 
   public query (message) func getDistributionList() : async [(Text, T.Distribution)] {
     //distributionHistoryList;
+    assert (_isAdmin(message.caller));
     return Iter.toArray(distributionHistoryByTimeStamp.entries());
   };
 
-  public query (message) func getCanisterTimeStamp() : async Int {
-    return now();
+  public query (message) func withdrawalList() : async [(Text, T.WithdrawalHistory)] {
+    //distributionHistoryList;
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(allWithdrawalHash.entries());
   };
 
-  public query (message) func getWithdrawn() : async Nat {
-    totalBalance;
+  public query (message) func failedWithdrawalList() : async [(Text, T.WithdrawalHistory)] {
+    //distributionHistoryList;
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(failedWithdrawalHash.entries());
   };
 
   public shared (message) func getCKBTCBalance() : async Nat {
@@ -801,18 +856,24 @@ shared ({ caller = owner }) actor class Miner({
     result;
   };
 
-  public shared (message) func withdrawIDR(quoteId_ : Text, amount_ : Nat, bankID_ : Text, memoParam_ : [Nat8]) : async Bool {
+  //)
+
+  public shared (message) func withdrawIDR(quoteId_ : Text, amount_ : Nat, bankID_ : Text, memoParam_ : [Nat8]) : async T.TransferRes {
+    //return false;
     assert (_isNotPaused());
     assert (_isAddressVerified(message.caller));
-    assert (amount_ > 11);
+    assert (amount_ > 10);
+    //assert (_isAdmin(message.caller));
     // let addr = Principal.fromText(address);
+    withdrawalIndex += 1;
     let amountNat_ : Nat = amount_;
     let res_ = getMiner(message.caller);
     var id_ = 0;
     var usernm = "";
     switch (res_) {
       case (#none) {
-        return false;
+        return #error("miner not found");
+        // return false;
       };
       case (#ok(m)) {
         id_ := m.id;
@@ -822,75 +883,302 @@ shared ({ caller = owner }) actor class Miner({
     //let miner_ = miners_[0];
     var memo_ : Blob = Text.encodeUtf8(bankID_ # "." #quoteId_);
     var minerStatus_ : T.MinerStatus = minerStatus.get(id_);
-    assert (minerStatus_.balance > (amount_ + 10));
+    if ((minerStatus_.balance < (amount_ + 10)) == true) {
+      return #error("insufficient balance");
+    };
 
     let blob_ = Blob.fromArray(memoParam_);
 
     let CKBTC_ = actor ("mxzaz-hqaaa-aaaar-qaada-cai") : actor {
       icrc1_transfer : (T.TransferArg) -> async T.Result;
     };
+    var tme = now();
 
-    let transferResult : T.Result = await CKBTC_.icrc1_transfer({
-      amount = amount_;
-      fee = ?10;
-      created_at_time = null;
-      from_subaccount = null;
-      to = { owner = Principal.fromText(jwalletVault); subaccount = null };
+    logTransaction(id_, "{\"action\":\"withdraw IDR\",\"receiver\":\"" #quoteId_ # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"IDR\",\"bank\":\"" #bankID_ # "\"}", usernm, Principal.toText(message.caller));
+    totalBalance -= (amount_ + 10);
+    minerStatus_.balance -= (amount_ + 10);
+    minerStatus_.totalWithdrawn += (amount_ + 10);
+    totalWithdrawn += (amount_ + 10);
+    switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+      case (?mStat) {
+        mStat.balance := minerStatus_.balance;
+        mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+        minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+      };
+      case (null) {
+
+      };
+    };
+
+    var wdh : T.WithdrawalHistory = {
+      id = withdrawalIndex;
+      //caller: Text;
+      time = tme;
+      action = "Withdraw IDR";
+      //receiver : Text;
+      amount = "pretransfer";
+      txid = "pretransfer";
+      currency = "IDR";
+      username = usernm;
+      wallet = Principal.toText(message.caller);
+      jwalletId = quoteId_;
+      bankId = bankID_;
       memo = ?blob_;
-    });
-    //DEV
-    /*
-    let transferResult = await CKBTC.icrc1_transfer({
-      amount = amount_;
-      fee = ?10;
-      created_at_time = null;
-      from_subaccount = null;
-      to = { owner = Principal.fromText(jwalletVault); subaccount = null };
-      memo = ?memoParam_;
-    });
-*/
+      //provider : Text;
+    };
+
+    switch (withdrawalHash.get(Nat.toText(id_))) {
+      case (?withdrawals) {
+        var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+
+      };
+      case (null) {
+
+        var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+      };
+    };
+    var transferResult : T.Result = #Ok(0);
+    try {
+      transferResult := await CKBTC_.icrc1_transfer({
+        amount = amount_;
+        fee = ?10;
+        created_at_time = null;
+        from_subaccount = null;
+        to = { owner = Principal.fromText(jwalletVault); subaccount = null };
+        memo = ?blob_;
+      });
+    } catch (error) {
+      minerStatus_.balance += (amount_ + 10);
+      minerStatus_.totalWithdrawn -= (amount_ + 10);
+      totalWithdrawn -= (amount_ + 10);
+      totalBalance += (amount_ + 10);
+      switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+        case (?mStat) {
+          mStat.balance := minerStatus_.balance;
+          mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+          minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+        };
+        case (null) {
+
+        };
+      };
+      logTransaction(id_, "{\"action\":\"crashed withdraw IDR\",\"receiver\":\"" #quoteId_ # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"IDR\",\"bank\":\"" #bankID_ # "\"}", usernm, Principal.toText(message.caller));
+
+      return #error("ckBTC transfer process unexpectly failed");
+    };
+
     var res = 0;
     switch (transferResult) {
       case (#Ok(number)) {
 
-        logTransaction(id_, "{\"action\":\"withdraw IDR\",\"receiver\":\"" #quoteId_ # "\"}", Nat.toText(amount_), Int.toText(number), "{\"currency\":\"IDR\",\"bank\":\"" #bankID_ # "\"}", usernm, Principal.toText(message.caller));
-        totalBalance -= (amount_ + 10);
-        minerStatus_.balance -= (amount_ + 10);
-        minerStatus_.totalWithdrawn += (amount_ + 10);
-        totalWithdrawn += (amount_ + 10);
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "Withdraw IDR";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = Int.toText(number);
+          currency = "IDR";
+          username = usernm;
+          wallet = Principal.toText(message.caller);
+          jwalletId = quoteId_;
+          bankId = bankID_;
+          memo = ?blob_;
+          //provider : Text;
+        };
 
+        switch (withdrawalHash.get(Nat.toText(id_))) {
+          case (?withdrawals) {
+            var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+
+          };
+          case (null) {
+
+            var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+          };
+        };
         // logTransaction(miner_.id, "withdraw IDR", Nat.toText(amount_), Int.toText(number) # " " #quoteId_, "IDR ");
-        return true;
+        logTransaction(id_, "{\"action\":\"withdraw IDR\",\"receiver\":\"" #quoteId_ # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"IDR\",\"bank\":\"" #bankID_ # "\"}", usernm, Principal.toText(message.caller));
+
+        return #success(amount_);
       };
       case (#Err(msg)) {
-
+        var tme = now() / 1000000;
+        var errmsg = "";
         Debug.print("transfer error  ");
         switch (msg) {
           case (#BadFee(number)) {
             Debug.print("Bad Fee");
+            errmsg := "Bad Fee";
           };
           case (#GenericError(number)) {
             Debug.print("err " #number.message);
+            errmsg := "err " #number.message;
           };
           case (#InsufficientFunds(number)) {
             Debug.print("insufficient funds");
-            return false;
+            errmsg := "insufficient funds";
           };
           case _ {
             Debug.print("err");
+            errmsg := "other";
           };
         };
-        res := 0;
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "FAILED : Withdraw IDR";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = errmsg;
+          currency = "IDR";
+          username = usernm;
+          wallet = Principal.toText(message.caller);
+          jwalletId = quoteId_;
+          bankId = bankID_;
+          memo = ?blob_;
+          //provider : Text;
+        };
+        minerStatus_.balance += (amount_ + 10);
+        minerStatus_.totalWithdrawn -= (amount_ + 10);
+        totalWithdrawn -= (amount_ + 10);
+        totalBalance += (amount_ + 10);
+        switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+          case (?mStat) {
+            mStat.balance := minerStatus_.balance;
+            mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+            minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+          };
+          case (null) {
+
+          };
+        };
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        failedWithdrawalHash.put(Int.toText(tme), wdh);
+        return #error("ckbtc offramp transferfailed : " #errmsg);
+      };
+
+    };
+
+    return #error("error");
+
+  };
+
+  public shared (message) func getAllWithdrawals() : async [(Text, T.WithdrawalHistory)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(allWithdrawalHash.entries());
+  };
+
+  public shared (message) func getTotalRevenue(principal : Text) : async Nat {
+    assert (_isAdmin(message.caller));
+
+    let res_ = getMiner(Principal.fromText(principal));
+    switch (res_) {
+      case (#none) {
+        return 0;
+      };
+      case (#ok(miner_)) {
+
+        var revenueHistory_ : [T.DistributionHistory] = [];
+        var totalRev = 0;
+        switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+          case (?r) {
+            revenueHistory_ := r;
+            for (sat in r.vals()) {
+              totalRev += sat.sats;
+            };
+            //let hist = Array.size(r);
+            return totalRev;
+          };
+          case (null) {
+            return 0;
+          };
+        };
       };
     };
 
-    false;
+  };
+
+  public shared (message) func getAllRevenue() : async Nat {
+    assert (_isAdmin(message.caller));
+    var ls = Iter.toArray(usernameHash.entries());
+    var totalRev = 0;
+    var adj = 0;
+    for (usr in ls.vals()) {
+      let miner_ = miners.get(usr.1);
+
+      var revenueHistory_ : [T.DistributionHistory] = [];
+
+      switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+        case (?r) {
+          revenueHistory_ := r;
+          for (sat in r.vals()) {
+            if (sat.from == "adjustment") adj += sat.sats;
+            if (sat.from != "adjustment") totalRev += sat.sats;
+          };
+          //let hist = Array.size(r);
+
+        };
+        case (null) {
+          //return 0;
+        };
+      };
+
+    };
+    return totalRev -adj;
+
+  };
+
+  public shared (message) func getAllRevenueRaw() : async [(Text, [T.DistributionHistory])] {
+    assert (_isAdmin(message.caller));
+    // var ls = Iter.toArray(usernameHash.entries());
+    return Iter.toArray(revenueHash.entries());
+
+  };
+
+  public shared (message) func getAllBalance() : async Nat {
+    assert (_isAdmin(message.caller));
+    var ls = Iter.toArray(usernameHash.entries());
+    var totalRev = 0;
+    for (usr in ls.vals()) {
+      let miner_ = miners.get(usr.1);
+      let minerStat_ = minerStatus.get(miner_.id);
+
+      totalRev += minerStat_.balance;
+
+    };
+    return totalRev;
 
   };
 
   public shared (message) func withdrawCKBTC(username_ : Text, amount_ : Nat, address : Text) : async T.TransferRes {
     assert (_isNotPaused());
     assert (totalBalance > amount_);
+    //assert (_isAdmin(message.caller));
+    withdrawalIndex += 1;
     //let addr = Principal.fromText(message.caller);
     let amountNat_ : Nat = amount_;
     let res_ = getMiner(message.caller);
@@ -907,59 +1195,215 @@ shared ({ caller = owner }) actor class Miner({
     };
     //let miner_ = miners_[0];
     var minerStatus_ : T.MinerStatus = minerStatus.get(id_);
-    assert (minerStatus_.balance > (amount_ + 10));
+    if (minerStatus_.balance < (amount_ + 10)) {
+      return #error("insufficient balance to withdraw");
+    };
 
-    let transferResult = await CKBTC.icrc1_transfer({
-      amount = amount_;
-      fee = ?10;
-      created_at_time = null;
-      from_subaccount = null;
-      to = { owner = Principal.fromText(address); subaccount = null };
+    logTransaction(id_, "{\"action\":\"pre-withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+    minerStatus_.balance -= (amount_ + 10);
+    minerStatus_.totalWithdrawn += (amount_ + 10);
+    switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+      case (?mStat) {
+        //return #success(mStat.totalWithdrawn);
+        mStat.balance := minerStatus_.balance;
+        mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+        minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+      };
+      case (null) {
+
+      };
+    };
+
+    totalWithdrawn += (amount_ + 10);
+    totalBalance -= (amount_ + 10);
+
+    var tme = now() / 1000000;
+    var wdh : T.WithdrawalHistory = {
+      id = withdrawalIndex;
+      //caller: Text;
+      time = tme;
+      action = "PRE Withdraw CKBTC";
+      //receiver : Text;
+      amount = Nat.toText(amount_);
+      txid = "pre transfer";
+      currency = "CKBTC";
+      username = uname;
+      wallet = Principal.toText(message.caller);
+      jwalletId = "";
+      bankId = "CKBTC";
       memo = null;
-    });
-    var res = 0;
+      //provider : Text;
+    };
+
+    switch (withdrawalHash.get(Nat.toText(id_))) {
+      case (?withdrawals) {
+        var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+
+      };
+      case (null) {
+
+        var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+      };
+    };
+    var transferResult : T.Result = #Ok(0);
+    try {
+      transferResult := await CKBTC.icrc1_transfer({
+        amount = amount_;
+        fee = ?10;
+        created_at_time = null;
+        from_subaccount = null;
+        to = { owner = Principal.fromText(address); subaccount = null };
+        memo = null;
+      });
+      var res = 0;
+    } catch (error) {
+      minerStatus_.balance += (amount_ + 10);
+      minerStatus_.totalWithdrawn -= (amount_ + 10);
+      totalWithdrawn -= (amount_ + 10);
+      totalBalance += (amount_ + 10);
+      switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+        case (?mStat) {
+          mStat.balance := minerStatus_.balance;
+          mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+          minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+        };
+        case (null) {
+
+        };
+      };
+      logTransaction(id_, "{\"action\":\"crashed withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+
+      return #error("ckbtc cansiter rejects");
+    };
 
     //var res = 0;
     switch (transferResult) {
       case (#Ok(number)) {
 
-        logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Int.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
-        minerStatus_.balance -= (amount_ + 10);
-        minerStatus_.totalWithdrawn += (amount_ + 10);
-        totalWithdrawn += (amount_ + 10);
-        totalBalance -= (amount_ + 10);
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "Withdraw CKBTC";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = Int.toText(number);
+          currency = "CKBTC";
+          username = uname;
+          wallet = Principal.toText(message.caller);
+          jwalletId = "";
+          bankId = "CKBTC";
+          memo = null;
+          //provider : Text;
+        };
+
+        switch (withdrawalHash.get(Nat.toText(id_))) {
+          case (?withdrawals) {
+            var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+
+          };
+          case (null) {
+
+            var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+          };
+        };
+        logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+
         return #success(number);
       };
       case (#Err(msg)) {
 
+        var tme = now() / 1000000;
+        var errmsg = "";
         Debug.print("transfer error  ");
         switch (msg) {
           case (#BadFee(number)) {
-            let a = number.expected_fee;
-            Debug.print("Bad Fee " #Nat.toText(a));
-            return #error("Bad Fee " #Nat.toText(a));
+            Debug.print("Bad Fee");
+            errmsg := "Bad Fee";
           };
           case (#GenericError(number)) {
             Debug.print("err " #number.message);
-            return #error("Generic Error");
+            errmsg := "err " #number.message;
           };
           case (#InsufficientFunds(number)) {
             Debug.print("insufficient funds");
-            return #error("Operator error");
+            errmsg := "insufficient funds";
           };
           case _ {
             Debug.print("err");
+            errmsg := "other";
           };
         };
-        res := 0;
+        //return #error(errmsg);
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "FAILED : Withdraw CKBTC";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = errmsg;
+          currency = "IDR";
+          username = uname;
+          wallet = Principal.toText(message.caller);
+          jwalletId = "";
+          bankId = "CKBTC";
+          memo = null;
+          //provider : Text;
+        };
+
+        minerStatus_.balance += (amount_ + 10);
+        minerStatus_.totalWithdrawn -= (amount_ + 10);
+        totalWithdrawn -= (amount_ + 10);
+        totalBalance += (amount_ + 10);
+        switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+          case (?mStat) {
+            mStat.balance := minerStatus_.balance;
+            mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
+            minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+          };
+          case (null) {
+
+          };
+        };
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        failedWithdrawalHash.put(Int.toText(tme), wdh);
+        return #error(errmsg);
       };
     };
+    //logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "failed", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
 
     return #error("Other Error");
   };
 
   public query (message) func whoCall() : async Text {
     return Principal.toText(message.caller);
+  };
+
+  public shared (message) func getTransaction() : async [T.TransactionHistory] {
+    assert (_isAdmin(message.caller));
+    return Buffer.toArray<T.TransactionHistory>(transactions);
   };
 
   func logTransaction(id_ : Nat, action_ : Text, amount_ : Text, txid_ : Text, currency_ : Text, username : Text, caller : Text) {
@@ -990,7 +1434,7 @@ shared ({ caller = owner }) actor class Miner({
     let array_ : [T.TransactionHistory] = [transaction];
     let status_ = minerStatus.get(id_);
     Debug.print("appending");
-    status_.transactions := Array.append<T.TransactionHistory>(status_.transactions, array_);
+    if (txid_ != "pre transfer") status_.transactions := Array.append<T.TransactionHistory>(status_.transactions, array_);
 
     transactions.add(transactionLog);
     transactionIndex += 1;
@@ -1106,10 +1550,14 @@ shared ({ caller = owner }) actor class Miner({
       };
     };
     var minerStatus_ : T.MinerStatus = minerStatus.get(id_);
+    assert (minerStatus_.balance > (amount_ + 10));
 
     let ic : T.IC = actor ("aaaaa-aa");
     let uid_ = addr_ #usd_ #Int.toText(now());
     let url = "https://api.lokamining.com/transfer?targetAddress=" #addr_ # "&amount=" #usd_ # "&id=" #uid_;
+    minerStatus_.totalWithdrawn += amount_ + 10;
+    totalBalance -= (amount_ + 10);
+    totalWithdrawn += (amount_ + 10);
     let decoded_text = await send_http(url);
     //let decoded_text = "transfersuccess";
     //return decoded_text;
@@ -1118,10 +1566,13 @@ shared ({ caller = owner }) actor class Miner({
     if (isValid) {
       let hashtext_ = textSplit(decoded_text, '/');
       let res = await moveCKBTC(amount_);
-      if (res) {
-        minerStatus_.totalWithdrawn += amount_ + 10;
-        totalBalance -= (amount_ + 10);
-        totalWithdrawn += (amount_ + 10);
+      if (res == false) {
+        minerStatus_.totalWithdrawn -= amount_ + 10;
+        totalBalance += (amount_ + 10);
+        totalWithdrawn -= (amount_ + 10);
+        logTransaction(id_, "{\"action\":\"failed withdraw USDT\",\"receiver\":\"" #addr_ # "\"}", Nat.toText(amount_), decoded_text, "{\"currency\":\"USDT\",\"chain\":\"Arbitrum\"}", username_, Principal.toText(message.caller));
+
+        return #error("transfer ckBTC failed");
       };
       logTransaction(id_, "{\"action\":\"withdraw USDT\",\"receiver\":\"" #addr_ # "\"}", Nat.toText(amount_), decoded_text, "{\"currency\":\"USDT\",\"chain\":\"Arbitrum\"}", username_, Principal.toText(message.caller));
       //logTransaction(miner_.id, "{action:\"withdrawCKBTC\",receiver:\""#address#"\"}", Nat.toText(amount_), Int.toText(number), "{currency:\"CKBTC\",chain:\"ICP\"}");
@@ -1129,24 +1580,13 @@ shared ({ caller = owner }) actor class Miner({
       return #success(1);
 
       //return true;
+    } else {
+      minerStatus_.totalWithdrawn -= amount_ + 10;
+      totalBalance += (amount_ + 10);
+      totalWithdrawn -= (amount_ + 10);
     };
     return #error(decoded_text);
     //decoded_text;
-  };
-
-  public shared (message) func testUSDT(success_ : Bool) : async Text {
-
-    if (success_) return "USDT transferred";
-    //logTransaction(miner_.id,"withdraw USDT", Nat.toText(amount_), hashtext_[1], "USDT");
-    if (success_ == false) return "Failed";
-    //return true;
-    return "None";
-
-  };
-
-  public shared (message) func testCKBTC(success_ : Bool) : async Bool {
-
-    return success_;
   };
 
   //@dev -- whenever USDT is withdrawn from Loka USDT pool, CKBTC will be sent as payment from Miner Pool to Loka CKBTC Pool
@@ -1165,41 +1605,44 @@ shared ({ caller = owner }) actor class Miner({
       spender_subaccount = null;
       memo = null;
     }); */
-
-    let transferResult = await CKBTC.icrc1_transfer({
-      amount = amount_;
-      fee = ?10;
-      created_at_time = null;
-      from_subaccount = null;
-      to = { owner = lokaCKBTCVault; subaccount = null };
-      memo = null;
-    });
-    //var res = 0;
-    var res = 0;
-    switch (transferResult) {
-      case (#Ok(number)) {
-        return true;
-      };
-      case (#Err(msg)) {
-
-        Debug.print("transfer error  ");
-        switch (msg) {
-          case (#BadFee(number)) {
-            Debug.print("Bad Fee");
-          };
-          case (#GenericError(number)) {
-            Debug.print("err " #number.message);
-          };
-          case (#InsufficientFunds(number)) {
-            Debug.print("insufficient funds");
-            return false;
-          };
-          case _ {
-            Debug.print("err");
-          };
+    try {
+      let transferResult = await CKBTC.icrc1_transfer({
+        amount = amount_;
+        fee = ?10;
+        created_at_time = null;
+        from_subaccount = null;
+        to = { owner = lokaCKBTCVault; subaccount = null };
+        memo = null;
+      });
+      //var res = 0;
+      var res = 0;
+      switch (transferResult) {
+        case (#Ok(number)) {
+          return true;
         };
-        res := 0;
+        case (#Err(msg)) {
+
+          Debug.print("transfer error  ");
+          switch (msg) {
+            case (#BadFee(number)) {
+              Debug.print("Bad Fee");
+            };
+            case (#GenericError(number)) {
+              Debug.print("err " #number.message);
+            };
+            case (#InsufficientFunds(number)) {
+              Debug.print("insufficient funds");
+              return false;
+            };
+            case _ {
+              Debug.print("err");
+            };
+          };
+          res := 0;
+        };
       };
+    } catch (error) {
+      return false;
     };
 
     false;
@@ -1268,28 +1711,9 @@ shared ({ caller = owner }) actor class Miner({
     };
   };
 
-  /*public query (message) func getMinerP() : async Text {
-
-    var miner_id : Nat = 0;
-    let emptyMiner = {
-      id = 0;
-      walletAddress = siteAdmin;
-      var username = "<empty>";
-      hashrate = 0;
-    };
-    let miner_ = minerHash.get(Principal.toText(message.caller));
-    switch (miner_) {
-      case (?m) {
-        return "miner found";
-      };
-      case (null) {
-        "Null";
-      };
-    };
-  }; */
-
-  func sendMPTS() {
-
+  public shared (message) func getUsername() : async [(Text, Nat)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(usernameHash.entries());
   };
 
   public shared (message) func shareRevenue(userName : Text, hashPercent_ : Nat) : async {
@@ -1461,6 +1885,12 @@ shared ({ caller = owner }) actor class Miner({
 
           };
         };
+        var cB = status_.balance;
+        if (cB > 10) {
+          cB := cB - 10;
+        } else {
+          cB := 0;
+        };
 
         let minerData : T.MinerData = {
           id = id_;
@@ -1469,7 +1899,7 @@ shared ({ caller = owner }) actor class Miner({
           username = m.username;
           hashrate = m.hashrate;
           verified = status_.verified;
-          balance = status_.balance;
+          balance = cB;
           //balance = 100000000;
           totalWithdrawn = status_.totalWithdrawn;
           totalReceivedSharedRevenue = status_.totalSharedRevenue;
@@ -1566,6 +1996,286 @@ shared ({ caller = owner }) actor class Miner({
       };
     };
 
+  };
+
+  public shared (message) func backupUserData() : async [T.MinerData] {
+    assert (_isAdmin(message.caller));
+    var res : [T.MinerData] = [];
+    var listUser = Iter.toArray(usernameHash.entries());
+    for (usr in listUser.vals()) {
+      let miner_ = miners.get(usr.1);
+      let status_ = minerStatus.get(miner_.id);
+      var revenueHistory_ : [T.DistributionHistory] = [];
+      var yesterdayRevenue_ = 0;
+      switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+        case (?r) {
+          revenueHistory_ := r;
+          //let hist = Array.size(r);
+          if (Array.size(r) > 0) yesterdayRevenue_ := r[Array.size(r) -1].sats;
+        };
+        case (null) {
+
+        };
+      };
+
+      var currentShared = 0;
+      var shareList_ : [(Text, T.RevenueShare)] = [];
+      switch (revenueShareHash.get(miner_.username)) {
+        case (?list) {
+
+          for (shareItem in list.vals()) {
+            currentShared += shareItem.1.sharePercent;
+          };
+          shareList_ := list;
+        };
+        case (null) {
+          currentShared := 0;
+        };
+      };
+      var receivedShareList_ : [(Text, T.RevenueShare)] = [];
+      switch (receivedRevenueShareHash.get(miner_.username)) {
+        case (?list) {
+
+          receivedShareList_ := list;
+        };
+        case (null) {
+
+        };
+      };
+      let minerData : T.MinerData = {
+        id = miner_.id;
+        walletAddress = miner_.walletAddress;
+        walletAddressText = Principal.toText(miner_.walletAddress);
+        username = miner_.username;
+        hashrate = miner_.hashrate;
+        verified = status_.verified;
+        balance = status_.balance;
+        //balance = 100000000;
+        totalWithdrawn = status_.totalWithdrawn;
+        totalReceivedSharedRevenue = status_.totalSharedRevenue;
+        receivedShareList = receivedShareList_;
+        savedWalletAddress = status_.walletAddress;
+        bankAddress = status_.bankAddress;
+        transactions = status_.transactions;
+        revenueHistory = revenueHistory_;
+        yesterdayRevenue = yesterdayRevenue_;
+        totalSharedPercent = currentShared;
+        shareList = shareList_;
+      };
+      res := Array.append<T.MinerData>(res, [minerData]);
+    };
+    //Debug.print("fetched 3");
+    res;
+  };
+
+  public shared (message) func adjustMinerBalance(queries : Text) : async Text {
+    assert (_isAdmin(message.caller));
+    var datas_ = textSplit(queries, '|');
+    var totalString = "";
+    var unameString = "";
+    //LOOP THROUGH
+    for (data in datas_.vals()) {
+
+      var ls = textSplit(data, '/');
+      var uname = ls[0];
+      var reward = textToNat(ls[1]); // THE DIFFERENCE
+      var p = 0;
+
+      switch (usernameHash.get(uname)) {
+        case (?mid) {
+          p := mid;
+        };
+        case (null) {
+
+        };
+      };
+      let miner_ = miners.get(p);
+      var totalShared = 0;
+
+      //handles list of user being shared from this user
+      switch (revenueShareHash.get(uname)) {
+        case (?list) {
+          unameString := unameString # uname # "-" #Nat.toText(reward) # " share to [-";
+          totalString := totalString # "[-";
+          for (shareItem in list.vals()) {
+            switch (usernameHash.get(shareItem.1.userName)) {
+              case (?theId) {
+                let sharedTarget = minerStatus.get(theId);
+                var sharedReward = (reward * shareItem.1.sharePercent) / 10000;
+
+                sharedTarget.balance -= sharedReward;
+                sharedTarget.totalSharedRevenue -= sharedReward;
+                totalShared += sharedReward;
+                unameString := unameString #shareItem.1.userName # "<>" #Nat.toText(sharedReward) # "|";
+                totalString := totalString # " shared - " #Nat.toText(sharedReward) # "|";
+                switch (minerStatusAndRewardHash.get(Nat.toText(sharedTarget.id))) {
+                  case (?mStat) {
+                    mStat.balance := sharedTarget.balance;
+                    mStat.transactions := sharedTarget.transactions;
+                    mStat.totalSharedRevenue := sharedTarget.totalSharedRevenue;
+                  };
+                  case (null) {
+
+                  };
+                };
+
+                let rev : [T.DistributionHistory] = [{
+                  time = now();
+                  hashrate = 0;
+                  sats = sharedReward;
+                  from = "adjustment ";
+                  fromUsername = uname;
+                }];
+                //transfer sharedMTPS
+                //var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
+
+                switch (revenueHash.get(shareItem.1.wallet)) {
+                  case (?r) {
+                    revenueHash.put(shareItem.1.wallet, Array.append<T.DistributionHistory>(r, rev));
+
+                  };
+                  case (null) {
+                    revenueHash.put(shareItem.1.wallet, rev);
+                  };
+                };
+              };
+              case (null) {
+
+              };
+            };
+
+          };
+          unameString := unameString # "-]|";
+          totalString := totalString # "-]|";
+
+        };
+        case (null) {
+
+        };
+      };
+      let rev : [T.DistributionHistory] = [{
+        time = now();
+        hashrate = 0;
+        sats = reward - totalShared;
+        from = "adjustment";
+        fromUsername = "adjustment";
+      }];
+
+      switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+        case (?r) {
+          revenueHash.put(Principal.toText(miner_.walletAddress), Array.append<T.DistributionHistory>(r, rev));
+
+        };
+        case (null) {
+          revenueHash.put(Principal.toText(miner_.walletAddress), rev);
+        };
+      };
+      unameString := unameString #uname # " nett >>" #Nat.toText(reward - totalShared) # "|";
+      totalString := totalString #Nat.toText(totalShared) # "|";
+
+      let status_ = minerStatus.get(miner_.id);
+      status_.balance -= (reward - totalShared);
+      /*
+       id : Nat;
+        var verified : Bool;
+        var balance : Nat;
+        var totalWithdrawn : Nat;
+        var walletAddress : [WalletAddress];
+        var bankAddress : [BankAddress];
+        var transactions : [TransactionHistory];
+        var totalSharedRevenue : Nat;
+      */
+      switch (minerStatusAndRewardHash.get(Nat.toText(miner_.id))) {
+        case (?mStat) {
+          mStat.balance := status_.balance;
+          mStat.transactions := status_.transactions;
+          mStat.totalSharedRevenue := status_.totalSharedRevenue;
+        };
+        case (null) {
+
+        };
+      };
+      totalBalance -= reward;
+
+    };
+    unameString;
+  };
+
+  public query (message) func fetchMinerByUsername(uname : Text) : async T.MinerData {
+
+    assert (_isAdmin(message.caller));
+
+    var yesterdayRevenue_ = 0;
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+
+      };
+    };
+
+    let miner_ = miners.get(p);
+    let status_ = minerStatus.get(miner_.id);
+    var revenueHistory_ : [T.DistributionHistory] = [];
+    switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+      case (?r) {
+        revenueHistory_ := r;
+        //let hist = Array.size(r);
+        if (Array.size(r) > 0) yesterdayRevenue_ := r[Array.size(r) -1].sats;
+      };
+      case (null) {
+
+      };
+    };
+
+    var currentShared = 0;
+    var shareList_ : [(Text, T.RevenueShare)] = [];
+    switch (revenueShareHash.get(miner_.username)) {
+      case (?list) {
+
+        for (shareItem in list.vals()) {
+          currentShared += shareItem.1.sharePercent;
+        };
+        shareList_ := list;
+      };
+      case (null) {
+        currentShared := 0;
+      };
+    };
+    var receivedShareList_ : [(Text, T.RevenueShare)] = [];
+    switch (receivedRevenueShareHash.get(miner_.username)) {
+      case (?list) {
+
+        receivedShareList_ := list;
+      };
+      case (null) {
+
+      };
+    };
+    let minerData : T.MinerData = {
+      id = miner_.id;
+      walletAddress = miner_.walletAddress;
+      walletAddressText = Principal.toText(miner_.walletAddress);
+      username = miner_.username;
+      hashrate = miner_.hashrate;
+      verified = status_.verified;
+      balance = status_.balance;
+      //balance = 100000000;
+      totalWithdrawn = status_.totalWithdrawn;
+      totalReceivedSharedRevenue = status_.totalSharedRevenue;
+      receivedShareList = receivedShareList_;
+      savedWalletAddress = status_.walletAddress;
+      bankAddress = status_.bankAddress;
+      transactions = status_.transactions;
+      revenueHistory = revenueHistory_;
+      yesterdayRevenue = yesterdayRevenue_;
+      totalSharedPercent = currentShared;
+      shareList = shareList_;
+    };
+    //Debug.print("fetched 3");
+    minerData;
   };
 
   public query (message) func fetchMinerById(p : Nat) : async T.MinerData {
@@ -1749,7 +2459,8 @@ shared ({ caller = owner }) actor class Miner({
     //assert(_isAdmin(message.caller));
     let now_ = now();
     var ckbtcb = await updateCKBTCBalance();
-    let url = "https://api.lokamining.com/calculatef2poolRewardV2";
+
+    let url = "https://api.lokamining.com/calculatef2poolRewardV2?id=poolR" #Int.toText(now_);
     let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
       getCalculatedReward : (a : Text) -> async Text;
     };
@@ -1845,7 +2556,7 @@ shared ({ caller = owner }) actor class Miner({
       hashrate = totalHash_;
       sats = totalReward_;
       time = timestamp_;
-      data = distributionData[3];
+      data = rewards_;
 
     };
 
@@ -1893,11 +2604,21 @@ shared ({ caller = owner }) actor class Miner({
                           var sharedMPTS = (((mpts * shareItem.1.sharePercent) / 10000) * (80)) / 100;
                           sharedTarget.balance += sharedReward;
                           sharedTarget.totalSharedRevenue += sharedReward;
+                          switch (minerStatusAndRewardHash.get(Nat.toText(sharedTarget.id))) {
+                            case (?mStat) {
+                              mStat.balance := sharedTarget.balance;
+                              mStat.transactions := sharedTarget.transactions;
+                              mStat.totalSharedRevenue := sharedTarget.totalSharedRevenue;
+                            };
+                            case (null) {
+
+                            };
+                          };
                           totalShared += sharedReward;
                           totalSharedHash += sharedHash;
                           totalSharedMPTS += sharedMPTS;
                           let rev : [T.DistributionHistory] = [{
-                            time = now();
+                            time = textToNat(timestamp_);
                             hashrate = sharedHash;
                             sats = sharedReward;
                             from = Principal.toText(miner.walletAddress);
@@ -1930,11 +2651,21 @@ shared ({ caller = owner }) actor class Miner({
                   };
                 };
                 status_.balance += reward - totalShared;
+                switch (minerStatusAndRewardHash.get(Nat.toText(status_.id))) {
+                  case (?mStat) {
+                    mStat.balance := status_.balance;
+                    mStat.transactions := status_.transactions;
+                    mStat.totalSharedRevenue := status_.totalSharedRevenue;
+                  };
+                  case (null) {
+
+                  };
+                };
                 netMPTS := mpts - totalSharedMPTS;
                 mptsTransferHash.put(Principal.toText(miner.walletAddress), netMPTS);
                 //totalBalance += reward;
                 let rev : [T.DistributionHistory] = [{
-                  time = now();
+                  time = textToNat(timestamp_);
                   hashrate = hashrate_ - totalSharedHash;
                   sats = reward - totalShared;
                   from = "";
@@ -1971,6 +2702,12 @@ shared ({ caller = owner }) actor class Miner({
     distributionHistoryList := Array.append<{ time : Int; data : Text }>(distributionHistoryList, d);
     lastF2poolCheck := tm;
     return "done";
+  };
+
+  public shared (message) func setT(a : Nat) : async Nat {
+    assert (_isAdmin(message.caller));
+    totalBalance := a;
+    totalBalance;
   };
 
   //@DEV- CORE MINER VERIFICATION

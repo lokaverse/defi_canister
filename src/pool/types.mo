@@ -19,6 +19,23 @@ module {
         //provider : Text;
     };
 
+    public type WithdrawalHistory = {
+        id : Nat;
+        //caller: Text;
+        time : Int;
+        action : Text;
+        jwalletId : Text;
+        bankId : Text;
+        //receiver : Text;
+        amount : Text;
+        txid : Text;
+        currency : Text;
+        username : Text;
+        wallet : Text;
+        memo : ?Blob;
+        //provider : Text;
+    };
+
     public type TransferError = {
         #GenericError : { message : Text; error_code : Nat };
         #TemporarilyUnavailable;
@@ -69,9 +86,21 @@ module {
         var totalSharedRevenue : Nat;
     };
 
+    public type SharableMinerStatus = {
+        id : Nat;
+        verified : Bool;
+        balance : Nat;
+        totalWithdrawn : Nat;
+        walletAddress : [WalletAddress];
+        bankAddress : [BankAddress];
+        transactions : [TransactionHistory];
+        totalSharedRevenue : Nat;
+    };
+
     public type ErrorLog = {
         id : Nat;
         time : Int;
+        username : Text;
         error : Text;
         wallet : Text;
         time_text : Text;
@@ -110,6 +139,11 @@ module {
         hashrate : Text;
         sats : Text;
         data : Text;
+    };
+
+    public type WDIDRResult = {
+        #success : Nat;
+        #failed : Text;
     };
 
     public type MinerData = {
