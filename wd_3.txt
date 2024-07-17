@@ -1,7 +1,0 @@
-(
-  record {
-    total = 281_913 : nat;
-    currentBalance = 263_156 : nat;
-    withdrawn = 18_757 : nat;
-  },
-)

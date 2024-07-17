@@ -21,6 +21,7 @@ import Char "mo:base/Char";
 import { now } = "mo:base/Time";
 import { abs } = "mo:base/Int";
 import HashMap "mo:base/HashMap";
+import Prim "mo:prim";
 import { setTimer; cancelTimer; recurringTimer } = "mo:base/Timer";
 
 import T "types";
@@ -341,6 +342,12 @@ shared ({ caller = owner }) actor class Miner({
     schedulerId;
   };
 
+  public shared (message) func setTS_(ts : Int) : async Bool {
+    assert (_isAdmin(message.caller));
+    nextTimeStamp := ts;
+    true;
+  };
+
   func initScheduler<system>(t_ : Int, fetchNewTime : Bool) : async Nat {
 
     cancelTimer(schedulerId);
@@ -457,7 +464,7 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   func _isAdmin(p : Principal) : Bool {
-    return (p == siteAdmin or p == Principal.fromText("o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe"));
+    return (p == siteAdmin or p == Principal.fromText("o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe") or p == Principal.fromText("2ro3m-uoe3m-ncjvu-4wjbl-7empr-mbh6d-s5emx-awswx-b2hxg-vvjcj-mae"));
   };
 
   func _isApp(key : Text) : Bool {
@@ -692,11 +699,23 @@ shared ({ caller = owner }) actor class Miner({
     currentBalance : Nat;
     withdrawn : Nat;
     total : Nat;
+    claimables : Nat;
   } {
+    var ls = Iter.toArray(usernameHash.entries());
+    var totalRev = 0;
+    for (usr in ls.vals()) {
+      let miner_ = miners.get(usr.1);
+      let minerStat_ = minerStatus.get(miner_.id);
+
+      totalRev += minerStat_.balance;
+
+    };
+
     return {
       currentBalance = totalBalance;
       withdrawn = totalWithdrawn;
       total = totalWithdrawn + totalBalance;
+      claimables = totalRev;
     };
   };
 
@@ -750,12 +769,18 @@ shared ({ caller = owner }) actor class Miner({
     };
   };
 
-  public shared (message) func updateBalance() : async () {
+  public shared (message) func updateBalance() : async {
+    #Ok : [UtxoStatus];
+    #Err : UpdateBalanceError;
+  } {
     assert (_isAdmin(message.caller));
     await updateCKBTCBalance();
   };
 
-  func updateCKBTCBalance() : async () {
+  func updateCKBTCBalance() : async {
+    #Ok : [UtxoStatus];
+    #Err : UpdateBalanceError;
+  } {
     let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
       update_balance : ({ subaccount : ?Nat }) -> async {
         #Ok : [UtxoStatus];
@@ -763,6 +788,7 @@ shared ({ caller = owner }) actor class Miner({
       };
     };
     let result = await Minter.update_balance({ subaccount = null }); //"(record {subaccount=null;})"
+    return result;
 
   };
 
@@ -898,12 +924,17 @@ shared ({ caller = owner }) actor class Miner({
     totalBalance -= (amount_ + 10);
     minerStatus_.balance -= (amount_ + 10);
     minerStatus_.totalWithdrawn += (amount_ + 10);
+    var tsr = minerStatus_.totalSharedRevenue;
+    if (minerStatus_.totalSharedRevenue > 0) {
+      if (minerStatus_.totalSharedRevenue > minerStatus_.balance) {
+        //minerStatus_.totalSharedRevenue := minerStatus_.balance;
+      };
+    };
     totalWithdrawn += (amount_ + 10);
     switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
       case (?mStat) {
-        mStat.balance := minerStatus_.balance;
-        mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-        minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+        minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
 
       };
       case (null) {
@@ -959,14 +990,12 @@ shared ({ caller = owner }) actor class Miner({
     } catch (error) {
       minerStatus_.balance += (amount_ + 10);
       minerStatus_.totalWithdrawn -= (amount_ + 10);
+      minerStatus_.totalSharedRevenue := tsr;
       totalWithdrawn -= (amount_ + 10);
       totalBalance += (amount_ + 10);
       switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
         case (?mStat) {
-          mStat.balance := minerStatus_.balance;
-          mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-          minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
-
+          minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
         };
         case (null) {
 
@@ -1063,13 +1092,13 @@ shared ({ caller = owner }) actor class Miner({
         };
         minerStatus_.balance += (amount_ + 10);
         minerStatus_.totalWithdrawn -= (amount_ + 10);
+        minerStatus_.totalSharedRevenue := tsr;
         totalWithdrawn -= (amount_ + 10);
         totalBalance += (amount_ + 10);
         switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
           case (?mStat) {
-            mStat.balance := minerStatus_.balance;
-            mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-            minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+            minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
 
           };
           case (null) {
@@ -1085,6 +1114,11 @@ shared ({ caller = owner }) actor class Miner({
 
     return #error("error");
 
+  };
+
+  public shared (message) func getErrorLogs() : async [(Text, T.ErrorLog)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(errorHash.entries());
   };
 
   public shared (message) func getAllWithdrawals() : async [(Text, T.WithdrawalHistory)] {
@@ -1107,8 +1141,10 @@ shared ({ caller = owner }) actor class Miner({
         switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
           case (?r) {
             revenueHistory_ := r;
+
             for (sat in r.vals()) {
-              totalRev += sat.sats;
+              // if (sat.from == "adjustment") adj += sat.sats;
+              if (sat.from != "adjustment") totalRev += sat.sats;
             };
             //let hist = Array.size(r);
             return totalRev;
@@ -1202,12 +1238,16 @@ shared ({ caller = owner }) actor class Miner({
     logTransaction(id_, "{\"action\":\"pre-withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
     minerStatus_.balance -= (amount_ + 10);
     minerStatus_.totalWithdrawn += (amount_ + 10);
+    var tsr = minerStatus_.totalSharedRevenue;
+    if (minerStatus_.totalSharedRevenue > 0) {
+      if (minerStatus_.totalSharedRevenue > minerStatus_.balance) {
+        //minerStatus_.totalSharedRevenue := minerStatus_.balance;
+      };
+    };
     switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
       case (?mStat) {
-        //return #success(mStat.totalWithdrawn);
-        mStat.balance := minerStatus_.balance;
-        mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-        minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+        minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
 
       };
       case (null) {
@@ -1268,13 +1308,13 @@ shared ({ caller = owner }) actor class Miner({
     } catch (error) {
       minerStatus_.balance += (amount_ + 10);
       minerStatus_.totalWithdrawn -= (amount_ + 10);
+      minerStatus_.totalSharedRevenue := tsr;
       totalWithdrawn -= (amount_ + 10);
       totalBalance += (amount_ + 10);
       switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
         case (?mStat) {
-          mStat.balance := minerStatus_.balance;
-          mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-          minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+          minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
 
         };
         case (null) {
@@ -1376,11 +1416,11 @@ shared ({ caller = owner }) actor class Miner({
         minerStatus_.totalWithdrawn -= (amount_ + 10);
         totalWithdrawn -= (amount_ + 10);
         totalBalance += (amount_ + 10);
+        minerStatus_.totalSharedRevenue := tsr;
         switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
           case (?mStat) {
-            mStat.balance := minerStatus_.balance;
-            mStat.totalWithdrawn += minerStatus_.totalWithdrawn;
-            minerStatusAndRewardHash.put(Nat.toText(id_), mStat);
+
+            minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
 
           };
           case (null) {
@@ -1537,6 +1577,8 @@ shared ({ caller = owner }) actor class Miner({
 
   public shared (message) func withdrawUSDT(username_ : Text, amount_ : Nat, addr_ : Text, usd_ : Text) : async T.TransferRes {
     assert (_isNotPaused());
+    return #error("due to maintenance, withdraw using USDT is temporary unavailable");
+    // assert (_isVerified(message.caller));
     let amountNat_ : Nat = amount_;
     //let miner_ = getMiner(message.caller);
     let res_ = getMiner(message.caller);
@@ -1544,13 +1586,18 @@ shared ({ caller = owner }) actor class Miner({
     switch (res_) {
       case (#none) {
         // return false;
+        return #error("no user");
       };
       case (#ok(m)) {
         id_ := m.id;
       };
     };
     var minerStatus_ : T.MinerStatus = minerStatus.get(id_);
-    assert (minerStatus_.balance > (amount_ + 10));
+    if ((minerStatus_.balance >= (amount_ + 10)) == false) {
+      return #error("insufficient fund : " #Nat.toText(amount_) # " requested, available " # Nat.toText(minerStatus_.balance));
+    };
+
+    logTransaction(id_, "{\"action\":\"withdraw USDT\",\"receiver\":\"" #addr_ # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"IDR\",\"bank\":\"" # "USDT" # "\"}", username_, Principal.toText(message.caller));
 
     let ic : T.IC = actor ("aaaaa-aa");
     let uid_ = addr_ #usd_ #Int.toText(now());
@@ -1558,7 +1605,44 @@ shared ({ caller = owner }) actor class Miner({
     minerStatus_.totalWithdrawn += amount_ + 10;
     totalBalance -= (amount_ + 10);
     totalWithdrawn += (amount_ + 10);
-    let decoded_text = await send_http(url);
+    minerStatus_.balance -= (amount_ + 10);
+    var tsr = minerStatus_.totalSharedRevenue;
+    if (minerStatus_.totalSharedRevenue > 0) {
+      if (minerStatus_.totalSharedRevenue > minerStatus_.balance) {
+        //minerStatus_.totalSharedRevenue := minerStatus_.balance;
+      };
+    };
+    switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+      case (?mStat) {
+
+        minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+      };
+      case (null) {
+
+      };
+    };
+    var decoded_text = "";
+    try {
+      decoded_text := await send_http(url);
+
+    } catch (error) {
+      minerStatus_.totalWithdrawn -= amount_ + 10;
+      minerStatus_.totalSharedRevenue := tsr;
+      totalBalance += (amount_ + 10);
+      totalWithdrawn -= (amount_ + 10);
+      switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+        case (?mStat) {
+
+          minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+        };
+        case (null) {
+
+        };
+      };
+      return #error("https outcall to send ckBTC failed");
+    };
     //let decoded_text = "transfersuccess";
     //return decoded_text;
     Debug.print("result " #decoded_text);
@@ -1577,13 +1661,24 @@ shared ({ caller = owner }) actor class Miner({
       logTransaction(id_, "{\"action\":\"withdraw USDT\",\"receiver\":\"" #addr_ # "\"}", Nat.toText(amount_), decoded_text, "{\"currency\":\"USDT\",\"chain\":\"Arbitrum\"}", username_, Principal.toText(message.caller));
       //logTransaction(miner_.id, "{action:\"withdrawCKBTC\",receiver:\""#address#"\"}", Nat.toText(amount_), Int.toText(number), "{currency:\"CKBTC\",chain:\"ICP\"}");
 
-      return #success(1);
+      return #success(amount_);
 
       //return true;
     } else {
       minerStatus_.totalWithdrawn -= amount_ + 10;
+      minerStatus_.totalSharedRevenue := tsr;
       totalBalance += (amount_ + 10);
       totalWithdrawn -= (amount_ + 10);
+      switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+        case (?mStat) {
+
+          minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+        };
+        case (null) {
+
+        };
+      };
     };
     return #error(decoded_text);
     //decoded_text;
@@ -1998,6 +2093,46 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
+  public shared (message) func adjustB(uname : Text, bal : Nat) : async Nat {
+    assert (_isAdmin(message.caller));
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+
+      };
+    };
+
+    let miner_ = miners.get(p);
+    let status_ = minerStatus.get(miner_.id);
+    status_.balance := bal;
+
+    bal;
+  };
+
+  public shared (message) func adjustMiner(uname : Text, newUname : Text, balance : Nat) : async Nat {
+    assert (_isAdmin(message.caller));
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+        usernameHash.delete(uname);
+        usernameHash.put(newUname, p);
+      };
+      case (null) {
+        return 0;
+      };
+    };
+
+    let miner_ = miners.get(p);
+    miner_.username := newUname;
+    let status_ = minerStatus.get(miner_.id);
+    status_.balance := balance;
+
+    1;
+  };
   public shared (message) func backupUserData() : async [T.MinerData] {
     assert (_isAdmin(message.caller));
     var res : [T.MinerData] = [];
@@ -2201,7 +2336,15 @@ shared ({ caller = owner }) actor class Miner({
     unameString;
   };
 
-  public query (message) func fetchMinerByUsername(uname : Text) : async T.MinerData {
+  func toLower(t : Text) : Text {
+    let r = Text.map(t, Prim.charToLower);
+    return r;
+  };
+
+  public query (message) func fetchMinerByUsername(uname : Text) : async {
+    #none : Nat;
+    #ok : T.MinerData;
+  } {
 
     assert (_isAdmin(message.caller));
 
@@ -2275,7 +2418,7 @@ shared ({ caller = owner }) actor class Miner({
       shareList = shareList_;
     };
     //Debug.print("fetched 3");
-    minerData;
+    #ok(minerData);
   };
 
   public query (message) func fetchMinerById(p : Nat) : async T.MinerData {
@@ -2484,6 +2627,9 @@ shared ({ caller = owner }) actor class Miner({
 
     //let hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
     var a = await distributeMiningRewards(hashrateRewards);
+    if (a != "done") {
+      return "already distributed";
+    };
     var rebase = await DEFI.rebaseLOKBTC();
     Debug.print(hashrateRewards);
     // return hashrateRewards;
@@ -2494,10 +2640,10 @@ shared ({ caller = owner }) actor class Miner({
   public shared (message) func routine24Force() : async Text {
     assert (_isAdmin(message.caller));
     distributionStatus := "processing";
-    //assert(_isAdmin(message.caller));
     let now_ = now();
     var ckbtcb = await updateCKBTCBalance();
-    let url = "https://api.lokamining.com/calculatef2poolRewardV2";
+
+    let url = "https://api.lokamining.com/calculatef2poolRewardV2?id=poolR" #Int.toText(now_);
     let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
       getCalculatedReward : (a : Text) -> async Text;
     };
@@ -2511,7 +2657,8 @@ shared ({ caller = owner }) actor class Miner({
 
       //return result;
     } catch e {
-
+      distributionStatus := "error";
+      let r_ = await reattempt();
       //return "reject";
       return "error";
     };
@@ -2523,6 +2670,25 @@ shared ({ caller = owner }) actor class Miner({
     var rebase = await DEFI.rebaseLOKBTC();
     Debug.print(hashrateRewards);
     // return hashrateRewards;
+
+    //return "done";
+    nextTimeStamp := now_ / 1000000 + (24 * 60 * 60 * 1000);
+
+    return hashrateRewards # " " #a;
+  };
+
+  public shared (message) func specialReward(hashrateData : Text) : async Text {
+    assert (_isAdmin(message.caller));
+    distributionStatus := "processing";
+    let now_ = now();
+
+    var hashrateRewards = hashrateData;
+    var count_ = 0;
+
+    logDistribution(0, "Distribute", hashrateRewards, "", "");
+
+    //let hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
+    var a = await distributeSpecialReward(hashrateRewards);
 
     return hashrateRewards # " " #a;
   };
@@ -2704,6 +2870,113 @@ shared ({ caller = owner }) actor class Miner({
     return "done";
   };
 
+  public shared (message) func distributeSpecialReward(rewards_ : Text) : async Text {
+
+    let distributionData = textSplit(rewards_, ':');
+    let timestamp_ = distributionData[0];
+    switch (distributionHistoryByTimeStamp.get(timestamp_)) {
+      case (?distributed) {
+        //preventing double distribution, marking 1 timestamp per day
+        return "already distributed";
+      };
+      case (null) {
+
+      };
+    };
+    let totalHash_ = distributionData[2];
+    let totalReward_ = distributionData[1];
+    let hashrateRewards = textSplit(distributionData[3], '|');
+    totalBalance += textToNat(totalReward_);
+    let dist_ : T.Distribution = {
+      id = distributionIndex;
+      hashrate = totalHash_;
+      sats = totalReward_;
+      time = timestamp_;
+      data = rewards_;
+
+    };
+
+    distributionHistoryByTimeStamp.put(timestamp_, dist_);
+    distributionTimestampById.put(Nat.toText(distributionIndex), timestamp_);
+    distributionIndex += 1;
+
+    var mptsTransferHash = HashMap.HashMap<Text, Nat>(0, Text.equal, Text.hash);
+    var netMPTS = 0;
+    var netHR = 0;
+    var mpts = 0;
+    Buffer.iterate<T.Miner>(
+      miners,
+      func(miner) {
+        let status_ = minerStatus.get(miner.id);
+
+        let user_ = miner.username;
+
+        let isValid = Text.contains(rewards_, #text user_);
+        if (isValid) {
+          for (hashrateRewards_ in hashrateRewards.vals()) {
+            if (hashrateRewards_ != "") {
+              Debug.print("split " #hashrateRewards_);
+              let hr_ = textSplit(hashrateRewards_, '/');
+              var username = hr_[0];
+              var reward = textToNat(hr_[2]);
+              //MPTS = 1% from received reward
+              mpts := reward / 100;
+              var hashrate_ = textToNat(hr_[1]);
+              var totalShared = 0;
+              var totalSharedHash = 0;
+              var totalSharedMPTS = 0;
+              Debug.print("miner username : " #username # " " #miner.username);
+              if (username == miner.username # "") {
+                Debug.print("distributing " #Nat.toText(reward));
+
+                status_.balance += reward - totalShared;
+                switch (minerStatusAndRewardHash.get(Nat.toText(status_.id))) {
+                  case (?mStat) {
+                    mStat.balance := status_.balance;
+                    mStat.transactions := status_.transactions;
+                    mStat.totalSharedRevenue := status_.totalSharedRevenue;
+                  };
+                  case (null) {
+
+                  };
+                };
+                netMPTS := mpts - totalSharedMPTS;
+
+                //totalBalance += reward;
+                let rev : [T.DistributionHistory] = [{
+                  time = textToNat(timestamp_);
+                  hashrate = hashrate_ - totalSharedHash;
+                  sats = reward - totalShared;
+                  from = "";
+                  fromUsername = "";
+                }];
+
+                switch (revenueHash.get(Principal.toText(miner.walletAddress))) {
+                  case (?r) {
+                    revenueHash.put(Principal.toText(miner.walletAddress), Array.append<T.DistributionHistory>(r, rev));
+
+                  };
+                  case (null) {
+                    revenueHash.put(Principal.toText(miner.walletAddress), rev);
+                  };
+                };
+              };
+
+            };
+          };
+        } else {
+          //status_.verified := false;
+        };
+      },
+    );
+
+    let tm = now() / 1000000;
+    let d = [{ time = tm; data = rewards_ }];
+    distributionHistoryList := Array.append<{ time : Int; data : Text }>(distributionHistoryList, d);
+    lastF2poolCheck := tm;
+    return "done";
+  };
+
   public shared (message) func setT(a : Nat) : async Nat {
     assert (_isAdmin(message.caller));
     totalBalance := a;
@@ -2711,8 +2984,9 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   //@DEV- CORE MINER VERIFICATION
-  public shared (message) func verifyMiner(uname : Text, hash_ : Nat) : async Bool {
+  public shared (message) func verifyMiner(uname__ : Text, hash_ : Nat) : async Bool {
     //assert (_isNotRegistered(message.caller, uname));
+    var uname = toLower(uname__);
     if (_isNotRegistered(message.caller, uname) == false) return false;
     //var isValid = Text.contains(decoded_text, #text hashText);
     var isValid = true;

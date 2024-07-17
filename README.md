@@ -1,6 +1,6 @@
 # Loka
 
-Loka is a platform that enables retail investors to acquire BTC at better than market prices through co-investing with Bitcoin miners. The arrangement is based on a trustless non-custodial escrow solution, which eliminates any exposure to centralized party risk.
+Loka is
 
 https://lokamining.com
 ![Loka](img/Loka.gif)
@@ -12,23 +12,18 @@ With Loka :
 
 ### Terms
 
-Loka has several main terms that should be remembered :
-
-1. Stash : Stash is a term for hashrate produced by miner, which then transferred to Loka, therefore redirecting their bitcoin mining rewards to Loka
-2. Trove : Trove is a chunk of Stash, purchased by retail investor therefore miner will get $ as "hashrate rent contract", and retail investor will get bitcoin reward from the Trove they bought
-3. Battery : Each Trove, which is actually hashrate, needs cost to pay their electricity, which the term "Battery" is a self explanatory, a token to recharge Trove. Optionally, retail investor can recharge their "Battery" by purchasing ckERC-20 stable coin, or by letting Loka to substract their bitcoin mining reward to pay for the battery cost.
-
 ## Introduction
 
-This project is a set of Motoko canister implementing trustless, decentralized, and collateralized bitcoin mining platform.
+This project is a set of Motoko canister implementing trustless, decentralized, and collaterallized, tokenized bitcoin mining ecosystem.
 It handles business models for 3 actors : the miners, liquidity providers, and retail investors.
 Loka run on Internet Computer, leveraging ckBTC, a non-custodial bitcoin wrapper, allowing users to safely use bitcoin transaction in an extremely faster execution.
 
 In this protocol:
 
-- Miner can transfer their hashrate to Loka, and creating Stash and Troves to be sold to retail investors.
-- Retail investor can rent hashrate from miner and directly claim ckBTC to their wallet as mining rewards.
-- Liquidity provider can deposit their collateral to the miners they trust, and claim profit from transactions.
+- Miner can transfer their hashrate to Loka, via our stratum server.
+- Liquidity provider can deposit their collateral to the Loka mining ecosystem.
+- Incentive engine : MPTS and LPTS
+-
 
 This is how the business model is represented by ICP canisters.
 
@@ -62,6 +57,8 @@ And this is the flow for retail user
 
 ### Front End
 
+refer to https://github.com/lokaverse/defi
+
 ## Installation
 
 Step-by-step guide to get a copy of the project up and running locally for development and testing.
@@ -72,12 +69,18 @@ IC SDK (https://internetcomputer.org/docs/current/developer-docs/setup/install/)
 
 ### Install
 
-A step-by-step guide to installing the project, including necessary configuration etc.
+Steps to install the project :
+
+1. deploy ckBTC_test (for development purpose)
+2. deploy lokBTC, a rebase-able token
+3. deploy MPTS and LPTS reward tokens
+4. deploy pool canister
+5. deploy defi canister
 
 #### Setting up environment
 
 ```bash
-$ git clone <GitHub repo>
+$ git clone <this GitHub repo>
 $ cd <project>
 $ npm install
 
@@ -86,7 +89,7 @@ $ npm install
 #### Deploying local ICRC1 token canisters
 
 These tokens are being used as currencies in Loka ecosystem.
-In production environment, LBTC should be replaced by ckBTC ledger on ICP.
+In production environment, ckBTC_test should be replaced by ckBTC ledger on ICP.
 LBTC is a token to represent Bitcoin mining reward, which is ckBTC in mainnet
 LOM is Loka native token, rewarded for staked NFTs
 ckUSD is a stable currency being used to purchase Loka mining Troves and Battery power.
@@ -335,28 +338,13 @@ And Loka canisters is ready
 Miners can send their hashrate
 Retail user can create their Trove
 
-## Usage
-
-Front End example for Loka protocol can be found here :
-And Loka Miners here :
-
-### Minting new Trove
-
-Usage examples can be canister calls:
-
-`
-
-## Documentation
-
-Further documentation can exist in the README file if the project only contains a few functions. It can also be located elsewhere, if it is extensive, if this is the case, link to it.
-
 ## Roadmap
 
 Describe the project roadmap, this could be the grant milestones, but it could also be the team's broader project roadmap.
 
-- [Q4 2023] Alpha Launch - Miner Dashboard
-- [Q1 2024] Lokamining Launch
-- [Q2 2024] Trove Bear and Bull Vault
+- [Q1 2024] Alpha Launch - Pool (done)
+- [Q3 2024] Lokamining Launch
+- [Q4 2024] Forward Hashrate Marketplace
 
 ## License
 
