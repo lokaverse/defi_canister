@@ -23,7 +23,7 @@ In this protocol:
 - Miner can transfer their hashrate to Loka, via our stratum server.
 - Liquidity provider can deposit their collateral to the Loka mining ecosystem.
 - Incentive engine : MPTS and LPTS
--
+- lokBTC : a rebase-able ICRC1-based token
 
 This is how the business model is represented by ICP canisters.
 
@@ -31,33 +31,17 @@ This is how the business model is represented by ICP canisters.
 
 ### Overview
 
-![Overview](img/Overview2.png)
+![Overview](img/architecture.png)
 
-### Protocol Design
+### Core Feautures
 
-Based on the business model, canister represented as diagram below
-![Canisters](img/protocol_design.png)
-
-### Miners
-
-Miners business flow represented as follow
-![Miners](miner2.png)
-
-Liquidity Provider business flow represented as follow
-![Miners](miner2.png)
-
-### Lokamining
-
-And this is the flow for retail user
-![lokamining](loka_user.png)
-
-### Collateral
-
-(coming soon)
+![Feature](img/feature.png)
 
 ### Front End
 
-refer to https://github.com/lokaverse/defi
+refer to
+https://github.com/lokaverse/defi
+https://github.com/lokaverse/pool
 
 ## Installation
 
@@ -86,26 +70,30 @@ $ npm install
 
 ```
 
-#### Deploying local ICRC1 token canisters
+#### Deploying Pool and Defi canisters
 
-These tokens are being used as currencies in Loka ecosystem.
-In production environment, ckBTC_test should be replaced by ckBTC ledger on ICP.
-LBTC is a token to represent Bitcoin mining reward, which is ckBTC in mainnet
-LOM is Loka native token, rewarded for staked NFTs
-ckUSD is a stable currency being used to purchase Loka mining Troves and Battery power.
+dfx deploy pool --argument '(record{admin = principal "[controller principal]"})' --network ic
+dfx canister call pool init '(false)' --network ic;
 
-These tokens will be required as dependency by several other Loka canisters
+sudo dfx deploy defi --argument '(record{admin = principal "[controller principal]"})' --network ic
+sudo dfx canister call defi init --network ic
 
+dfx canister id defi (save the principal id for later)
+
+#### Deploying MPTS, and LPTS canisters
+
+MPTS and LPTS are reward tokens to be given to miner and LPs, alongside BTC reward from RWA mining
+the minter of MPTS and LPTS is the DEFI canister, so make sure to put DEFI canister principal as minting account for these tokens
 Now lets deploy these local tokens (make sure you are still in the project root directory) :
 
 ```bash
 $ export MINTER = $(dfx identity get-principal)
 
-$ dfx deploy lbtc  --argument "(variant {Init =
+$ dfx deploy mpts  --argument "(variant {Init =
 record {
-     token_symbol = \"LBTC\";
-     token_name = \"LBTC\";
-     minting_account = record { owner = principal \"${MINTER}\" };
+     token_symbol = \"[token symbol]\";
+     token_name = \"[token name]\";
+     minting_account = record { owner = principal \"[DEFI PRINCIPAL ID]\" };
      transfer_fee = 10;
      metadata = vec {};
      feature_flags = opt record{icrc2 = true};
@@ -119,32 +107,12 @@ record {
  }
 })"
 
-dfx deploy lbtc  --argument "(variant {Init =
+$ dfx deploy lpts  --argument "(variant {Init =
 record {
-     token_symbol = \"EYES\";
-     token_name = \"EYES\";
-     minting_account = record { owner = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\" };
-     transfer_fee = 0;
-     metadata = vec {};
-     feature_flags = opt record{icrc2 = true};
-     initial_balances = vec { record { record { owner = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\"; }; 1000000000000; }; };
-     archive_options = record {
-         num_blocks_to_archive = 1000;
-         trigger_threshold = 2000;
-         controller_id = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\";
-         cycles_for_archive_creation = opt 10000000000000;
-     };
- }
-})" --network ic
-
-s4bfy-iaaaa-aaaam-ab4qa-cai
-
-$ dfx deploy lom  --argument "(variant {Init =
-record {
-     token_symbol = \"LOM\";
-     token_name = \"LOM\";
-     minting_account = record { owner = principal \"${MINTER}\" };
-     transfer_fee = 0;
+     token_symbol = \"[token symbol]\";
+     token_name = \"[token name]\";
+     minting_account = record { owner = principal \"[DEFI PRINCIPAL ID]\" };
+     transfer_fee = 10;
      metadata = vec {};
      feature_flags = opt record{icrc2 = true};
      initial_balances = vec { record { record { owner = principal \"${MINTER}\"; }; 1000000000000; }; };
@@ -158,185 +126,38 @@ record {
 })"
 
 
-$ dfx deploy stable  --argument "(variant {Init =
-record {
-     token_symbol = \"LUSD\";
-     token_name = \"LUSD\";
-     minting_account = record { owner = principal \"${MINTER}\" };
-     transfer_fee = 0;
-     metadata = vec {};
-     feature_flags = opt record{icrc2 = true};
-     initial_balances = vec { record { record { owner = principal \"${MINTER}\"; }; 1000000000000; }; };
-     archive_options = record {
-         num_blocks_to_archive = 1000;
-         trigger_threshold = 2000;
-         controller_id = principal \"${MINTER}\";
-         cycles_for_archive_creation = opt 10000000000000;
-     };
- }
-})"
-
-
-$ dfx deploy tempeeyes  --argument "(variant {Init =
-record {
-     token_symbol = \"EYI\";
-     token_name = \"EYI\";
-     minting_account = record { owner = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\" };
-     transfer_fee = 0;
-     metadata = vec {};
-     feature_flags = opt record{icrc2 = true};
-     initial_balances = vec { record { record { owner = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\"; }; 1000000000000; }; };
-     archive_options = record {
-         num_blocks_to_archive = 1000;
-         trigger_threshold = 2000;
-         controller_id = principal \"s4bfy-iaaaa-aaaam-ab4qa-cai\";
-         cycles_for_archive_creation = opt 10000000000000;
-     };
- }
-})"
-
-
-dfx deploy ckbtc_prod --network ic  --argument "(variant {Init =
-record {
-     token_symbol = \"LBTC\";
-     token_name = \"LBTC\";
-     minting_account = record { owner = principal \"2zosz-ithna-3dqa4-crx3i-2gy7e-o3rkp-fa6wk-mczsu-3h7bi-poiym-hae\" };
-     transfer_fee = 0;
-     metadata = vec {};
-     feature_flags = opt record{icrc2 = true};
-     initial_balances = vec { record { record { owner = principal \"2zosz-ithna-3dqa4-crx3i-2gy7e-o3rkp-fa6wk-mczsu-3h7bi-poiym-hae\"; }; 1000000000000; }; };
-     archive_options = record {
-         num_blocks_to_archive = 1000;
-         trigger_threshold = 2000;
-         controller_id = principal \"2zosz-ithna-3dqa4-crx3i-2gy7e-o3rkp-fa6wk-mczsu-3h7bi-poiym-hae\";
-         cycles_for_archive_creation = opt 10000000000000;
-     };
- }
-})"
 
 ```
 
-#### Deploying mainnet ckBTC interface canisters
+you can also deploy a ckbtc_test token to represent ckbtc by running deploy_test_ckbtc.sh under "runners" directory
+dont forget to change the principal to your deployer principal id
 
-On mainnet, Loka will be using ckBTC (which represented by LBTC on local deployment)
-You can follow the step to deploy ckBTC interface canister here :
+#### Deploying lokBTC canisters
+
+lokBTC is a rebase-able token based on ICRC1
+the total supply will be rebased every 24 hour, referring to mining pool wallet ckBTC balance
+the balance for each lokBTC holder will be proportional to how many ckBTC they staked in the staking pool
+
+first, change the minting account with DEFI principal address on deploy_local_lokbtc.sh file under "runners" dir
 
 ```bash
-$ export MINTER = $(dfx identity get-principal)
-$ dfx deploy ckbtc_prod  --argument "(variant {Init =
-record {
-     token_symbol = \"CKBTC\";
-     token_name = \"CKBTC\";
-     minting_account = record { owner = principal \"${MINTER}\" };
-     transfer_fee = 0;
-     metadata = vec {};
-     feature_flags = opt record{icrc2 = true};
-     initial_balances = vec { record { record { owner = principal \"${MINTER}\"; }; 1000000000000; }; };
-     archive_options = record {
-         num_blocks_to_archive = 1000;
-         trigger_threshold = 2000;
-         controller_id = principal \"${MINTER}\";
-         cycles_for_archive_creation = opt 10000000000000;
-     };
- }
-})" --network ic
-
+minting_account = opt record{
+    owner = principal \"[change to your DEFI principal id]\";
+    subaccount = null;
+  };
 ```
 
-#### Deploying Loka Mining Site Canister
-
-\*This part will soon be deprecated as it will be merged with Loka Miner Canister in this document
-
-Initially, this canister will act as mining site ledger, managing the data of all mining sites (or hashrates) all over the world and Stashes in Loka ecosystem
+then run
 
 ```bash
-$ export MINTER = $(dfx identity get-principal)
-$ dfx deploy xdragon --argument '(record{admin = principal "2zosz-ithna-3dqa4-crx3i-2gy7e-o3rkp-fa6wk-mczsu-3h7bi-poiym-hae"})' --network ic
+
+sudo sh ./runners/deploy_local_lokbtc.sh
 
 ```
 
-#### Deploying Loka NFT Canister
-
-To make Loka Troves composable across the chain, whether to be used as collateral for DeFi loans, trading, and such, Loka represent Trove as NFT
-
-```bash
-$ export MINTER = $(dfx identity get-principal)
-$ dfx deploy nft --argument '(principal "${MINTER}")'
-
-```
-
-#### Deploying Loka Mining Site Controller
-
-This canister works as business logic provider, as all the business logic execution and schedulers are being handled by Controller Canister.
-Including :
-
-1. minting new Trove
-2. claiming ckBTC reward by retail user
-3. distributing ckBTC reward by system every 24 hours
-
-deployment example :
-
-```bash
-$ export MINTER = $(dfx identity get-principal)
-$ dfx deploy controller --argument '(record{admin = principal "2zosz-ithna-3dqa4-crx3i-2gy7e-o3rkp-fa6wk-mczsu-3h7bi-poiym-hae";hashrate=0.035; electricity = 0.035; miningSiteIdparam = 1 ; siteName = "jakarta-1"; totalHashrate =4000.0 ;})'
-
-```
-
-\*This part will soon be deprecated as it will be merged with Loka Miner Canister in this document
-
-#### Deploying Loka Miner Canister
-
-Miner Canister manages all Stashes from onboarding miners, to claiming bitcoin rewards.
-All Troves created are based on Stash data from this canister.
-It has dependency to ckBTC ledger and an external API to transfer USDT to miner's wallet
-
-```bash
-$ export MINTER = $(dfx identity get-principal)
-$ dfx deploy miner --argument '(record{admin = principal "${MINTER}"})'
-
-```
-
-Miner Canister has its own front end to differentiate it from retail investor.
-
-#### Setting up initial data and mining sites
-
-getting canister ids
-
-```bash
-$ dfx canister id nft
-$ dfx canister id controller
-```
-
-setting up controller canister to manage nft canister
-
-```bash
-$ dfx canister call (nft name) setMinter '(principal "your controller id")'
-
-```
-
-put some LBTC token to represent bitcoin mining rewards to your controller
-
-```bash
-$ dfx canister call lbtc icrc1_transfer "(record { to = record { owner = principal \"bw4dl-smaaa-aaaaa-qaacq-cai\";};  amount = 10_000_000_000_000;})" --network ic
- rg2ah-xl6x4-z6svw-bdxfv-klmal-cwfel-cfgzg-eoi6q-nszv5-7z5hg-sqe
-```
-
-52nf6-f5syy-tjpga-fbnli-gfqcp-bvfwb-2vona-lf3qh-u3ssq-wuyti-3ae
-
-dfx canister call ckbtc_test icrc1_transfer "(record { to = record { owner = principal \"o4k35-i6lb3-mfi6a-6mwzo-iuxj6-qci6k-l7whg-3ntvl-2vcum-dq7ac-2qe\";}; amount = 10_000_000_00;})" --network ic
-
-dfx canister call lbtc icrc1_transfer "(record { to = record { owner = principal \"gq3rs-huaaa-aaaaa-qaasa-cai\";}; amount = 100_000_000_000;})"
-
-register the controller to miningSite canister
-
-```bash
-$ dfx canister call loka addMiningSite '("Jakarta", "jakarta-1", 0.035,0.035,4000,"7dktp-hiaaa-aaaam-ab2ea-cai", "7elv3-kqaaa-aaaam-ab2eq-cai")'
-
-```
-
-And Loka canisters is ready
+And Loka canisters are ready
 Miners can send their hashrate
-Retail user can create their Trove
+LP can stake their BTC
 
 ## Roadmap
 
@@ -353,5 +174,3 @@ This project is licensed under the GNU 3 license
 ## References
 
 - [Internet Computer](https://internetcomputer.org)
-- [Loka Whitepaper]
-- [Loka Technical Documentation](https://lokamining.gitbook.com)
