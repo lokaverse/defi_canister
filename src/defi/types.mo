@@ -32,6 +32,11 @@ module {
         //provider : Text;
     };
 
+    public type Shares = {
+        walletAddress : Text;
+        share : Nat;
+    };
+
     public type TransferError = {
         #GenericError : { message : Text; error_code : Nat };
         #TemporarilyUnavailable;
@@ -106,6 +111,12 @@ module {
     public type TransferRes = {
         #success : Nat;
         #error : Text;
+    };
+
+    public type Claimable = {
+        id : Nat;
+        amount : Nat;
+        time : Int;
     };
 
     public type HttpHeader = {

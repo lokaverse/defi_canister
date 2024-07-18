@@ -5,3 +5,4 @@
 /.Makefile
 /.mops
 /.env
+/user.sh

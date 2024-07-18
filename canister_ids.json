@@ -10,5 +10,14 @@
   },
   "lokbtc_test": {
     "ic": "7rfqs-zaaaa-aaaak-qihwq-cai"
+  },
+  "lpts": {
+    "ic": "qkwrs-wiaaa-aaaak-qindq-cai"
+  },
+  "mpts": {
+    "ic": "qnxxg-3qaaa-aaaak-qinda-cai"
+  },
+  "pool": {
+    "ic": "vc5gc-naaaa-aaaak-qigoq-cai"
   }
 }
