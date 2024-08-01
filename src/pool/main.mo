@@ -67,6 +67,7 @@ shared ({ caller = owner }) actor class Miner({
   stable var errorHash_ : [(Text, T.ErrorLog)] = [];
   private var withdrawalHash = HashMap.HashMap<Text, [(Text, T.WithdrawalHistory)]>(0, Text.equal, Text.hash);
   stable var withdrawalHash_ : [(Text, [(Text, T.WithdrawalHistory)])] = [];
+  //private var adjustmentHash = HashMap.HashMap<Text, [(Text, {T.WithdrawalHistory})]>(0, Text.equal, Text.hash);
   private var allWithdrawalHash = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
   private var allSuccessfulWithdrawalHash = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
   stable var allWithdrawalHash_ : [(Text, T.WithdrawalHistory)] = [];
@@ -166,6 +167,40 @@ shared ({ caller = owner }) actor class Miner({
     return schedulerId;
   };
 
+  public shared (message) func migrateBalance(fromUser : Text, toUser : Text) : async Bool {
+    assert (_isAdmin(message.caller));
+
+    var p = 0;
+    switch (usernameHash.get(fromUser)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+        return false;
+      };
+    };
+
+    let minerFrom_ = miners.get(p);
+    let statusFrom_ = minerStatus.get(minerFrom_.id);
+
+    var p2 = 0;
+    switch (usernameHash.get(toUser)) {
+      case (?mid) {
+        p2 := mid;
+      };
+      case (null) {
+        return false;
+      };
+    };
+
+    let minerTo_ = miners.get(p2);
+    let statusTo_ = minerStatus.get(minerTo_.id);
+
+    statusTo_.balance := statusTo_.balance + statusFrom_.balance;
+    statusFrom_.balance := 0;
+    true;
+  };
+
   public shared (message) func logError(errorMessage : Text, username : Text) : async () {
     assert (_isVerified(message.caller, username));
     let err_ : T.ErrorLog = {
@@ -232,21 +267,33 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   public shared (message) func getShareList() : async [(Text, [(Text, T.RevenueShare)])] {
+    assert (_isAdmin(message.caller));
     revenueShareHash_ := Iter.toArray(revenueShareHash.entries());
     return revenueShareHash_;
   };
 
   public shared (message) func getReceivedShareList() : async [(Text, [(Text, T.RevenueShare)])] {
+    assert (_isAdmin(message.caller));
     revenueShareHash_ := Iter.toArray(receivedRevenueShareHash.entries());
     return revenueShareHash_;
   };
 
-  public query (message) func initialDistributionHour() : async Int {
-    return nextTimeStamp;
+  public query (message) func initialDistributionHour() : async {
+    timestamp : Int;
+    hourCountDown : Int;
+  } {
+    assert (_isAdmin(message.caller));
+    var hourCountDown : Int = 0;
+    var now_ = now() / 1000000;
+    if (now_ < nextTimeStamp) {
+      hourCountDown := (nextTimeStamp - now_) / (60 * 60 * 1000);
+    };
+    return { timestamp = nextTimeStamp; hourCountDown = hourCountDown };
   };
   //function to check scheduler / scheduler
   //returns counter+10 each 10 seconds when waiting for night time, and only adds +1 when already active
   public query (message) func getCounter() : async Nat {
+    assert (_isAdmin(message.caller));
     return counter;
   };
 
@@ -277,13 +324,15 @@ shared ({ caller = owner }) actor class Miner({
   public shared (message) func init(fetchNewTime : Bool) : async Nat {
     assert (_isAdmin(message.caller));
     let t_ = now() / 1000000;
+    distributing := false;
     await initScheduler(t_, fetchNewTime);
   };
 
   private stable var distributionStatus : Text = "none";
 
-  public shared (message) func migrateJwallet() : async [(Text, Text)] {
+  public shared (message) func migrateJwallet() : async Nat {
     assert (_isAdmin(message.caller));
+    var totalAdded = 0;
     let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
       gwa : () -> async [(Text, Text)];
     };
@@ -291,12 +340,21 @@ shared ({ caller = owner }) actor class Miner({
     try {
       let result = await LokaMiner.gwa(); //"(record {subaccount=null;})"
       jwalletId_ := result;
-      jwalletId := HashMap.fromIter<Text, Text>(jwalletId_.vals(), 1, Text.equal, Text.hash);
+      for (jwallet in jwalletId_.vals()) {
+        switch (jwalletId.get(jwallet.0)) {
+          case (?j) {};
+          case (null) {
+            jwalletId.put(jwallet.0, jwallet.1);
+            totalAdded += 1;
+          };
+        };
+      };
+      //jwalletId := HashMap.fromIter<Text, Text>(jwalletId_.vals(), 1, Text.equal, Text.hash);
 
     } catch e {
 
     };
-    return jwalletId_;
+    return totalAdded;
   };
   private stable var enableDist_ = true;
 
@@ -328,7 +386,7 @@ shared ({ caller = owner }) actor class Miner({
           //schedulerSecondsInterval := 24 * 60 * 60;
           if (res == "done") {
             let t_ = now() / 1000000;
-            let i = await initScheduler(t_, true);
+            let i = await initScheduler(t_, false);
             //nextTimeStamp := time_ + (24 * 60 * 60 * 1000);
             distributionStatus := "none";
           };
@@ -347,7 +405,7 @@ shared ({ caller = owner }) actor class Miner({
     nextTimeStamp := ts;
     true;
   };
-
+  stable var distributing = false;
   func initScheduler<system>(t_ : Int, fetchNewTime : Bool) : async Nat {
 
     cancelTimer(schedulerId);
@@ -356,6 +414,7 @@ shared ({ caller = owner }) actor class Miner({
     if (fetchNewTime) {
       nextTimeStamp := 0;
       nextTimeStamp := await getNextTimeStamp(currentTimeStamp_);
+      nextTimeStamp := nextTimeStamp - (1 * 60 * 60 * 1000);
       Debug.print("stamp " #Int.toText(nextTimeStamp));
     };
     if (nextTimeStamp == 0) return 0;
@@ -367,7 +426,7 @@ shared ({ caller = owner }) actor class Miner({
         if (time_ >= nextTimeStamp) {
           //counter := 200;
           //if (distributionStatus != "none") {
-          if (enableDist_) {
+          if (enableDist_ and distributing == false) {
             let res = await routine24();
             //schedulerSecondsInterval := 24 * 60 * 60;
             if (res == "done") {
@@ -381,18 +440,6 @@ shared ({ caller = owner }) actor class Miner({
           // schedulerId := scheduler();
 
         };
-      },
-    );
-    schedulerId;
-  };
-
-  func scheduler<system>() : Nat {
-    schedulerId := recurringTimer(
-      // #seconds(24 * 60 * 60),
-      #seconds(24 * 60 * 60),
-      func() : async () {
-        if (counter < 300) { counter += 1 } else { counter := 0 };
-        let res = await routine24();
       },
     );
     schedulerId;
@@ -700,7 +747,12 @@ shared ({ caller = owner }) actor class Miner({
     withdrawn : Nat;
     total : Nat;
     claimables : Nat;
+    ckBTCBalance : Nat;
   } {
+    // assert (_isAdmin(message.caller));
+    //var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
+    var ckBTCBalance = 0;
+    //ckBTCBalance;
     var ls = Iter.toArray(usernameHash.entries());
     var totalRev = 0;
     for (usr in ls.vals()) {
@@ -716,6 +768,37 @@ shared ({ caller = owner }) actor class Miner({
       withdrawn = totalWithdrawn;
       total = totalWithdrawn + totalBalance;
       claimables = totalRev;
+      ckBTCBalance = ckBTCBalance;
+    };
+  };
+
+  public shared (message) func getAllBalances() : async {
+    currentBalance : Nat;
+    withdrawn : Nat;
+    total : Nat;
+    claimables : Nat;
+    ckBTCBalance : Nat;
+  } {
+    assert (_isAdmin(message.caller));
+    var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
+    // ckBTCBalance = 0;
+    //ckBTCBalance;
+    var ls = Iter.toArray(usernameHash.entries());
+    var totalRev = 0;
+    for (usr in ls.vals()) {
+      let miner_ = miners.get(usr.1);
+      let minerStat_ = minerStatus.get(miner_.id);
+
+      totalRev += minerStat_.balance;
+
+    };
+
+    return {
+      currentBalance = totalBalance;
+      withdrawn = totalWithdrawn;
+      total = totalWithdrawn + totalBalance;
+      claimables = totalRev;
+      ckBTCBalance = ckBTCBalance;
     };
   };
 
@@ -857,6 +940,12 @@ shared ({ caller = owner }) actor class Miner({
     return #none("Account not found");
   };
 
+  public shared (message) func getAllJwalletId() : async [(Text, Text)] {
+    assert (_isAdmin(message.caller));
+    return Iter.toArray(jwalletId.entries());
+
+  };
+
   public shared (message) func recordJwalletId(type_ : Text, acc_ : Text, uuid_ : Text) : async {
     #exist : Text;
     #ok;
@@ -874,12 +963,61 @@ shared ({ caller = owner }) actor class Miner({
     };
     //return #ok("yo");
   };
+
+  public shared (message) func forceRecordJwalletId(type_ : Text, acc_ : Text, uuid_ : Text) : async Bool {
+    assert (_isAdmin(message.caller));
+    jwalletId.put(type_ #acc_, uuid_);
+    return true;
+
+    //return #ok("yo");
+  };
+
   public shared (message) func getCKBTCMinter() : async Text {
     let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
       get_btc_address : ({ subaccount : ?Nat }) -> async Text;
     };
     let result = await Minter.get_btc_address({ subaccount = null }); //"(record {subaccount=null;})"
     result;
+  };
+
+  public shared (message) func differData() : async Text {
+
+    assert (_isAdmin(message.caller));
+    var dataori = "1721692800000:129903:3200889784818537:ant8601/0/0|ant8602/38824134719/2|ant8603/32353445599/2|ant8604/19412067359/1|ant9001/45294823838/2|ant9002/19412067359/1|armancryptant/198779569759801/9483|armancryptant3/0/0|arwanagroup/187659690507450/8953|ava7501/0/0|ava7801/0/0|ava8701/0/0|dody85/238341279185323/5830|dragon/517748954575052/24701|john/38538375278889/943|karmana01/71884980928516/1758|kucing/732285334304900/20239|kucinggendutter/0/0|rendysena/178652491252709/8523|silver/385627188782719/18398|yudakukuh/651216623704302/31068:23-Jul-2024-00-00-00";
+    var datanew = "1721692800000:159109:2101170690572634:ant8601/0/0|ant8602/19412067359/1|ant8603/16176722799/1|ant8604/9706033680/1|ant9001/22647411919/2|ant9002/9706033680/1|armancryptant/100709805460337/7572|armancryptant3/0/0|arwanagroup/95382810642474/7172|ava7501/0/0|ava7801/0/0|ava8701/0/0|dody85/238341279185323/18193|dragon/262727772658358/19755|john/38538375278889/2942|karmana01/71884980928516/5487|kucing/682213928641792/52018|kucinggendutter/0/0|rendysena/90413321398479/6798|silver/195272456256878/14683|yudakukuh/325608311852151/24483:23-Jul-2024-00-00-00";
+    let distributionData = textSplit(datanew, ':');
+    let distributionDataOri = textSplit(dataori, ':');
+    let timestamp_ = distributionDataOri[0];
+    switch (distributionHistoryByTimeStamp.get(timestamp_)) {
+      case (?distributed) {
+        //preventing double distribution, marking 1 timestamp per day
+        return "already distributed";
+      };
+      case (null) {
+
+      };
+    };
+    let totalHash_ = textToNat(distributionData[2]) - textToNat(distributionDataOri[2]);
+    let totalReward_ = textToNat(distributionData[1]) -textToNat(distributionDataOri[1]);
+    var newString = timestamp_ # ":" #Nat.toText(totalReward_) # ":" #Nat.toText(totalHash_);
+    let hashrateRewards = textSplit(distributionData[3], '|');
+    let hashrateRewardsOri = textSplit(distributionDataOri[3], '|');
+
+    for (hashrateRewards_ in hashrateRewards.vals()) {
+      let hr_ = textSplit(hashrateRewards_, '/');
+      var username = hr_[0];
+      var reward = textToNat(hr_[2]);
+      var hashh_ = hr_[1];
+      for (hashrateRewardsOri_ in hashrateRewardsOri.vals()) {
+        let hrori_ = textSplit(hashrateRewardsOri_, '/');
+        if (hrori_[0] == username and reward < textToNat(hrori_[2])) {
+          newString := newString #username # "/" #hashh_ # "/" #Nat.toText(reward - textToNat(hrori_[2])) # "|";
+        };
+      };
+
+    };
+
+    return newString;
   };
 
   //)
@@ -1126,17 +1264,71 @@ shared ({ caller = owner }) actor class Miner({
     return Iter.toArray(allWithdrawalHash.entries());
   };
 
-  public shared (message) func getTotalRevenue(principal : Text) : async Nat {
+  public shared (message) func recalculateBalance() : async {
+    kurang : Nat;
+    lebih : Nat;
+    detail : [{
+      username : Text;
+      result : Text;
+      amount : Nat;
+    }];
+  } {
     assert (_isAdmin(message.caller));
+    minerHash_ := Iter.toArray(minerHash.entries());
+    var balancediff = 0;
+    var lists : [{
+      username : Text;
+      result : Text;
+      amount : Nat;
+    }] = [];
+    //var listDiff :
+    var totalKelebihan = 0;
+    var totalKurang = 0;
+    for (m in minerHash_.vals()) {
+      //if (m.1.username == "john" or m.1.username == "kucing") {
+      var theminer = minerStatus.get(m.1.id);
+      var totalRev = await getTotalRevenue(Principal.toText(m.1.walletAddress));
+      if (totalRev.num > theminer.totalWithdrawn) {
+        var balance = totalRev.num - theminer.totalWithdrawn;
+        var diff = 0;
+        var r = "";
+        if (theminer.balance > balance) {
+          diff := theminer.balance - balance;
+          //totalBalance -= diff;
+          //theminer.balance := balance;
+          r := "kelebihan";
+          totalKelebihan += diff;
+        };
+        if (theminer.balance < balance) {
+          diff := balance - theminer.balance;
+          // totalBalance += diff;
+          //theminer.balance := balance;
+          r := "kurang";
+          totalKurang += diff;
+        };
+        lists := Array.append<{ username : Text; result : Text; amount : Nat }>(lists, [{ username = m.1.username; result = r; amount = diff }]);
 
+        //};
+        minerStatusAndRewardHash.put(Nat.toText(m.1.id), theminer);
+      };
+
+    };
+    return { kurang = totalKurang; lebih = totalKelebihan; detail = lists };
+  };
+
+  public shared (message) func getTotalRevenue(principal : Text) : async {
+    num : Nat;
+    dets : [T.DistributionHistory];
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var revenueHistory_ : [T.DistributionHistory] = [];
     let res_ = getMiner(Principal.fromText(principal));
     switch (res_) {
       case (#none) {
-        return 0;
+        return { num = 0; dets = revenueHistory_ };
       };
       case (#ok(miner_)) {
 
-        var revenueHistory_ : [T.DistributionHistory] = [];
         var totalRev = 0;
         switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
           case (?r) {
@@ -1147,10 +1339,201 @@ shared ({ caller = owner }) actor class Miner({
               if (sat.from != "adjustment") totalRev += sat.sats;
             };
             //let hist = Array.size(r);
-            return totalRev;
+            return { num = totalRev; dets = r };
           };
           case (null) {
-            return 0;
+            return { num = 0; dets = revenueHistory_ };
+          };
+        };
+      };
+    };
+
+  };
+
+  public shared (message) func getTotalLokaRevenue() : async {
+    total : Nat;
+    details : [(Text, T.Distribution)];
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var dist = Iter.toArray(distributionHistoryByTimeStamp.entries());
+    var total = 0;
+    for (d in dist.vals()) {
+      total += textToNat(d.1.sats);
+    };
+    { total = total; details = dist };
+
+  };
+
+  public shared (message) func getTotalLokaRevenueUser(uname : Text) : async {
+    total : Nat;
+    userTotal : Nat;
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var dist = Iter.toArray(distributionHistoryByTimeStamp.entries());
+    var total = 0;
+    for (d in dist.vals()) {
+      if (Text.contains(d.1.data, #text uname) and Text.contains(d.1.data, #text ":")) {
+        var detailData = textSplit(d.1.data, ':');
+        var digits = 3;
+        if (Array.size(detailData) < 5) digits := 2;
+        var detailReward = detailData[digits];
+        var rows = textSplit(detailReward, '|');
+        for (r in rows.vals()) {
+          if (Text.contains(r, #text "/")) {
+            var r1 = textSplit(r, '/');
+            if (r1[0] == uname) total += textToNat(r1[2]);
+          };
+        };
+
+      } else if (Text.contains(d.1.data, #text uname)) {
+
+        var rows = textSplit(d.1.data, '|');
+        for (r in rows.vals()) {
+          if (Text.contains(r, #text "/")) {
+            var r1 = textSplit(r, '/');
+            if (r1[0] == uname) total += textToNat(r1[2]);
+          };
+        };
+
+      };
+    };
+    var user_ = await getTotalRevenueUser(uname);
+    { total = total; userTotal = user_.num };
+
+  };
+
+  public shared (message) func getTotalRevenueUser(uname : Text) : async {
+    num : Nat;
+    dets : [T.DistributionHistory];
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var revenueHistory_ : [T.DistributionHistory] = [];
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+
+      };
+    };
+
+    let miner_ = miners.get(p);
+    let res_ = getMiner(miner_.walletAddress);
+    switch (res_) {
+      case (#none) {
+        return { num = 0; dets = revenueHistory_ };
+      };
+      case (#ok(miner_)) {
+
+        var totalRev = 0;
+        switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+          case (?r) {
+            revenueHistory_ := r;
+
+            for (sat in r.vals()) {
+              // if (sat.from == "adjustment") adj += sat.sats;
+              if (sat.from != "adjustment") totalRev += sat.sats;
+            };
+            //let hist = Array.size(r);
+            return { num = totalRev; dets = r };
+          };
+          case (null) {
+            return { num = 0; dets = revenueHistory_ };
+          };
+        };
+      };
+    };
+
+  };
+
+  public shared (message) func getTotalRevenueUserShare(uname : Text, from : Text) : async {
+    num : Nat;
+    dets : [{ sats : Nat }];
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var revenueHistory_ : [T.DistributionHistory] = [];
+    var p = 0;
+    var satsAr : [{ sats : Nat }] = [];
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+
+      };
+    };
+
+    let miner_ = miners.get(p);
+    let res_ = getMiner(miner_.walletAddress);
+    switch (res_) {
+      case (#none) {
+        return { num = 0; dets = revenueHistory_ };
+      };
+      case (#ok(miner_)) {
+
+        var totalRev = 0;
+        switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+          case (?r) {
+            revenueHistory_ := r;
+
+            for (sat in r.vals()) {
+              // if (sat.from == "adjustment") adj += sat.sats;
+              if (sat.from != "adjustment" and sat.fromUsername == from) {
+                totalRev += sat.sats;
+                satsAr := Array.append<{ sats : Nat }>(satsAr, [{ sats = sat.sats }]);
+              };
+            };
+            //let hist = Array.size(r);
+            return { num = totalRev; dets = satsAr };
+          };
+          case (null) {
+            return { num = 0; dets = satsAr };
+          };
+        };
+      };
+    };
+
+  };
+
+  public shared (message) func matchRevenue(timestamp : Text, uname : Text) : async {
+    num : Nat;
+    dets : [T.DistributionHistory];
+  } {
+    assert (_isAdmin(message.caller) or message.caller == Principal.fromActor(this));
+    var revenueHistory_ : [T.DistributionHistory] = [];
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+
+      };
+    };
+
+    let miner_ = miners.get(p);
+    let res_ = getMiner(miner_.walletAddress);
+    switch (res_) {
+      case (#none) {
+        return { num = 0; dets = revenueHistory_ };
+      };
+      case (#ok(miner_)) {
+
+        var totalRev = 0;
+        switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+          case (?r) {
+            revenueHistory_ := r;
+
+            for (sat in r.vals()) {
+              // if (sat.from == "adjustment") adj += sat.sats;
+              if (sat.from != "adjustment") totalRev += sat.sats;
+            };
+            //let hist = Array.size(r);
+            return { num = totalRev; dets = r };
+          };
+          case (null) {
+            return { num = 0; dets = revenueHistory_ };
           };
         };
       };
@@ -1806,9 +2189,14 @@ shared ({ caller = owner }) actor class Miner({
     };
   };
 
-  public shared (message) func getUsername() : async [(Text, Nat)] {
+  public shared (message) func getUsername() : async {
+    total : Nat;
+    detail : [(Text, Nat)];
+  } {
     assert (_isAdmin(message.caller));
-    return Iter.toArray(usernameHash.entries());
+    var dataa = Iter.toArray(usernameHash.entries());
+    var total = Array.size(dataa);
+    return { total = total; detail = dataa };
   };
 
   public shared (message) func shareRevenue(userName : Text, hashPercent_ : Nat) : async {
@@ -2112,7 +2500,7 @@ shared ({ caller = owner }) actor class Miner({
     bal;
   };
 
-  public shared (message) func adjustMiner(uname : Text, newUname : Text, balance : Nat) : async Nat {
+  public shared (message) func adjustMiner(uname : Text, newUname : Text) : async Nat {
     assert (_isAdmin(message.caller));
     var p = 0;
     switch (usernameHash.get(uname)) {
@@ -2129,10 +2517,12 @@ shared ({ caller = owner }) actor class Miner({
     let miner_ = miners.get(p);
     miner_.username := newUname;
     let status_ = minerStatus.get(miner_.id);
-    status_.balance := balance;
+    minerStatusAndRewardHash.put(Nat.toText(p), status_);
+    //status_.balance := balance;
 
     1;
   };
+
   public shared (message) func backupUserData() : async [T.MinerData] {
     assert (_isAdmin(message.caller));
     var res : [T.MinerData] = [];
@@ -2355,7 +2745,7 @@ shared ({ caller = owner }) actor class Miner({
         p := mid;
       };
       case (null) {
-
+        return #none(0);
       };
     };
 
@@ -2419,6 +2809,34 @@ shared ({ caller = owner }) actor class Miner({
     };
     //Debug.print("fetched 3");
     #ok(minerData);
+  };
+
+  public query (message) func getUsernameMapping() : async Text {
+
+    assert (_isAdmin(message.caller));
+    var map = "[";
+
+    usernameHash_ := Iter.toArray(usernameHash.entries());
+    for (unames in usernameHash_.vals()) {
+
+      var p = 0;
+      switch (usernameHash.get(unames.0)) {
+        case (?mid) {
+          p := mid;
+        };
+        case (null) {
+
+        };
+      };
+
+      let miner_ = miners.get(p);
+      let status_ = minerStatus.get(miner_.id);
+      map := map # "{username : " #miner_.username # ", address : " #Principal.toText(miner_.walletAddress) # " }";
+
+    };
+
+    //Debug.print("fetched 3");
+    return map # "]";
   };
 
   public query (message) func fetchMinerById(p : Nat) : async T.MinerData {
@@ -2600,6 +3018,7 @@ shared ({ caller = owner }) actor class Miner({
   private func routine24() : async Text {
     //distributionStatus := "processing";
     //assert(_isAdmin(message.caller));
+    distributing := true;
     let now_ = now();
     var ckbtcb = await updateCKBTCBalance();
 
@@ -2628,18 +3047,20 @@ shared ({ caller = owner }) actor class Miner({
     //let hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
     var a = await distributeMiningRewards(hashrateRewards);
     if (a != "done") {
+      nextTimeStamp := nextTimeStamp + (24 * 60 * 60 * 1000);
       return "already distributed";
+
     };
     var rebase = await DEFI.rebaseLOKBTC();
     Debug.print(hashrateRewards);
     // return hashrateRewards;
-
+    distributing := false;
     return "done";
   };
 
   public shared (message) func routine24Force() : async Text {
     assert (_isAdmin(message.caller));
-    distributionStatus := "processing";
+    //distributionStatus := "processing";
     let now_ = now();
     var ckbtcb = await updateCKBTCBalance();
 
@@ -2649,16 +3070,14 @@ shared ({ caller = owner }) actor class Miner({
     };
     var hashrateRewards = "";
     var count_ = 0;
-
+    var dt = "1721692800000:159109:2101170690572634:ant8601/0/0|ant8602/19412067359/1|ant8603/16176722799/1|ant8604/9706033680/1|ant9001/22647411919/2|ant9002/9706033680/1|armancryptant/100709805460337/7572|armancryptant3/0/0|arwanagroup/95382810642474/7172|ava7501/0/0|ava7801/0/0|ava8701/0/0|dody85/238341279185323/18193|dragon/262727772658358/19755|john/38538375278889/2942|karmana01/71884980928516/5487|kucing/682213928641792/52018|kucinggendutter/0/0|rendysena/90413321398479/6798|silver/195272456256878/14683|yudakukuh/325608311852151/24483:23-Jul-2024-00-00-00";
     try {
       let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
       hashrateRewards := result;
-      distributionStatus := "done";
-
-      //return result;
+      //distributionStatus := "done";
     } catch e {
-      distributionStatus := "error";
-      let r_ = await reattempt();
+      //distributionStatus := "error";
+      //let r_ = await reattempt();
       //return "reject";
       return "error";
     };
@@ -2667,12 +3086,11 @@ shared ({ caller = owner }) actor class Miner({
 
     //let hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
     var a = await distributeMiningRewards(hashrateRewards);
-    var rebase = await DEFI.rebaseLOKBTC();
-    Debug.print(hashrateRewards);
-    // return hashrateRewards;
 
     //return "done";
-    nextTimeStamp := now_ / 1000000 + (24 * 60 * 60 * 1000);
+    //nextTimeStamp := now_ / 1000000 + (24 * 60 * 60 * 1000);
+    let t_ = now() / 1000000;
+    var ad = await initScheduler(t_, false);
 
     return hashrateRewards # " " #a;
   };
@@ -2701,7 +3119,8 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   public shared (message) func distributeMiningRewards(rewards_ : Text) : async Text {
-
+    assert (message.caller == Principal.fromActor(this) or _isAdmin(message.caller));
+    //format rewards_ : timestamp:reward:hashrate:user/hash/reward|:datetimestring
     let distributionData = textSplit(rewards_, ':');
     let timestamp_ = distributionData[0];
     switch (distributionHistoryByTimeStamp.get(timestamp_)) {
@@ -2867,6 +3286,163 @@ shared ({ caller = owner }) actor class Miner({
     let d = [{ time = tm; data = rewards_ }];
     distributionHistoryList := Array.append<{ time : Int; data : Text }>(distributionHistoryList, d);
     lastF2poolCheck := tm;
+    return "done";
+  };
+
+  public shared (message) func undoDistribution(rewards__ : Text) : async Text {
+    assert (_isAdmin(message.caller));
+    var rewards_ = "1721692800000:155970:2059428275060899:ant8601/0/0|ant8602/19412067359/1|ant8603/16176722799/1|ant8604/9706033680/1|ant9001/22647411919/2|ant9002/9706033680/1|armancryptant/100709805460337/7572|armancryptant3/0/0|arwanagroup/95382810642474/7172|ava7501/0/0|ava7801/0/0|ava8701/0/0|dody85/238341279185323/18193|dragon/220985357146624/16616|john/38538375278889/2942|karmana01/71884980928516/5487|kucing/682213928641792/52018|kucinggendutter/0/0|rendysena/90413321398479/6798|silver/195272456256878/14683|yudakukuh/325608311852151/24483:23-Jul-2024-00-00-00";
+    let distributionData = textSplit(rewards_, ':');
+    let timestamp_ = distributionData[0];
+    switch (distributionHistoryByTimeStamp.get(timestamp_)) {
+      case (?distributed) {
+        //only do if distribution timestamp detected
+        if (distributed.time == timestamp_) return "matched!";
+        return "found!";
+      };
+      case (null) {
+        return "not found";
+      };
+    };
+    return "none";
+
+    let hashrateRewards = textSplit(distributionData[3], '|');
+
+    var mpts = 0;
+    Buffer.iterate<T.Miner>(
+      miners,
+      func(miner) {
+        let status_ = minerStatus.get(miner.id);
+
+        let user_ = miner.username;
+
+        let isValid = Text.contains(rewards_, #text user_);
+        if (isValid) {
+          for (hashrateRewards_ in hashrateRewards.vals()) {
+            if (hashrateRewards_ != "") {
+              Debug.print("split " #hashrateRewards_);
+              let hr_ = textSplit(hashrateRewards_, '/');
+              var username = hr_[0];
+              var reward = textToNat(hr_[2]);
+              //MPTS = 1% from received reward
+              mpts := reward / 100;
+              var hashrate_ = textToNat(hr_[1]);
+              var totalShared = 0;
+              //var totalSharedMPTS = 0;
+              Debug.print("miner username : " #username # " " #miner.username);
+              if (username == miner.username # "") {
+                Debug.print("distributing " #Nat.toText(reward));
+                switch (revenueShareHash.get(miner.username)) {
+                  case (?list) {
+
+                    for (shareItem in list.vals()) {
+                      switch (usernameHash.get(shareItem.1.userName)) {
+                        case (?theId) {
+                          let sharedTarget = minerStatus.get(theId);
+                          var sharedReward = (reward * shareItem.1.sharePercent) / 10000;
+                          var sharedHash = (hashrate_ * shareItem.1.sharePercent) / 10000;
+                          //var sharedMPTS = (((mpts * shareItem.1.sharePercent) / 10000) * (80)) / 100;
+                          if (sharedTarget.balance > sharedReward) {
+                            sharedTarget.balance -= sharedReward;
+                            totalBalance -= sharedReward;
+                          };
+                          if (sharedTarget.totalSharedRevenue > sharedReward) sharedTarget.totalSharedRevenue -= sharedReward;
+                          switch (minerStatusAndRewardHash.get(Nat.toText(sharedTarget.id))) {
+                            case (?mStat) {
+                              mStat.balance := sharedTarget.balance;
+                              mStat.transactions := sharedTarget.transactions;
+                              mStat.totalSharedRevenue := sharedTarget.totalSharedRevenue;
+                            };
+                            case (null) {
+
+                            };
+                          };
+                          totalShared += sharedReward;
+
+                          let rev : [T.DistributionHistory] = [{
+                            time = textToNat(timestamp_);
+                            hashrate = sharedHash;
+                            sats = sharedReward;
+                            from = "adjusting distribution -" #Nat.toText(sharedReward);
+                            fromUsername = "adjusting distribution -" #Nat.toText(sharedReward);
+                          }];
+                          //transfer sharedMTPS
+                          //var ckBTCBalance : Nat = (await CKBTC.icrc1_balance_of({ owner = Principal.fromActor(this); subaccount = null }));
+
+                          //mptsTransferHash.put(shareItem.1.wallet, (sharedMPTS));
+                          switch (revenueHash.get(shareItem.1.wallet)) {
+                            case (?r) {
+                              var updatedRev : [T.DistributionHistory] = [];
+                              for (l in r.vals()) {
+                                if (Int.toText(l.time) != timestamp_) {
+                                  updatedRev := Array.append<T.DistributionHistory>(updatedRev, [l]);
+                                };
+                              };
+                              revenueHash.put(shareItem.1.wallet, updatedRev);
+                              //revenueHash.put(shareItem.1.wallet, Array.append<T.DistributionHistory>(r, rev));
+
+                            };
+                            case (null) {
+                              //revenueHash.put(shareItem.1.wallet, rev);
+                            };
+                          };
+                        };
+                        case (null) {
+
+                        };
+                      };
+
+                    };
+
+                  };
+                  case (null) {
+
+                  };
+                };
+                if (status_.balance > (reward - totalShared)) {
+                  status_.balance -= (reward - totalShared);
+                  totalBalance -= (reward - totalShared);
+                };
+                switch (minerStatusAndRewardHash.get(Nat.toText(status_.id))) {
+                  case (?mStat) {
+                    mStat.balance := status_.balance;
+                    mStat.transactions := status_.transactions;
+                    mStat.totalSharedRevenue := status_.totalSharedRevenue;
+                  };
+                  case (null) {
+
+                  };
+                };
+
+                switch (revenueHash.get(Principal.toText(miner.walletAddress))) {
+                  case (?r) {
+                    var updatedRev : [T.DistributionHistory] = [];
+                    for (l in r.vals()) {
+                      if (Int.toText(l.time) != timestamp_) {
+                        updatedRev := Array.append<T.DistributionHistory>(updatedRev, [l]);
+                      };
+                    };
+                    revenueHash.put(Principal.toText(miner.walletAddress), updatedRev);
+
+                  };
+                  case (null) {
+                    //revenueHash.put(Principal.toText(miner.walletAddress), rev);
+                  };
+                };
+              };
+
+            };
+          };
+        } else {
+          //status_.verified := false;
+        };
+      },
+    );
+
+    let tm = now() / 1000000;
+
+    distributionHistoryByTimeStamp.delete(timestamp_);
+    distributionTimestampById.delete(Nat.toText(distributionIndex));
     return "done";
   };
 
