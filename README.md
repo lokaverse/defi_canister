@@ -152,6 +152,8 @@ then run
 ```bash
 
 sudo sh ./runners/deploy_local_lokbtc.sh
+sudo sh ./runners/deploy_pool.sh
+sudo sh ./runners/deploy_defi.sh
 
 ```
 

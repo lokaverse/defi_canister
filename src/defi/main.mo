@@ -33,8 +33,8 @@ shared ({ caller = owner }) actor class Miner({
   //private stable var jwalletVault = "rg2ah-xl6x4-z6svw-bdxfv-klmal-cwfel-cfgzg-eoi6q-nszv5-7z5hg-sqe"; //DEV
   private stable var jwalletVault = "43hyn-pv646-27kl3-hhrll-wbdtc-k4idi-7mbyz-uvwxj-hgktq-topls-rae"; //PROD
   private var siteAdmin : Principal = admin;
-  private var lokBTC = "";
-  private var totalShares = 0;
+  private stable var lokBTC = "";
+  private stable var totalShares = 0;
   stable var lokaCKBTCPool : Principal = admin;
   private stable var usersIndex = 0;
   private stable var transactionIndex = 0;
@@ -103,6 +103,7 @@ shared ({ caller = owner }) actor class Miner({
     schedulerId := 0;
     nextTimeStamp := 0;
     counter := 0;
+    totalShares := 0;
 
   };
 
@@ -192,7 +193,7 @@ shared ({ caller = owner }) actor class Miner({
       case (?claimable_) {
         var detailedHash = HashMap.fromIter<Nat, T.Claimable>(claimable_.vals(), 1, Nat.equal, Hash.hash);
 
-        for (claim in claimList.vals()) {
+        for (claim in claimable_.vals()) {
           if (claim.1.time <= now_) {
             totalWithdrawableCKBTC += claim.1.amount;
             detailedHash.delete(claim.0);
@@ -822,15 +823,17 @@ shared ({ caller = owner }) actor class Miner({
     switch (sharesHash.get(Principal.toText(message.caller))) {
       case (?share) {
         if (share.share >= (amount_ + 10)) {
+          //return #error("okgooda " #Nat.toText(totalShares) # " sub by " #Nat.toText(amount_ + 10));
           //update totalshare and share to lokbtc canister
           totalShares -= (amount_ + 10);
+
+          //update totalshare and share to lokbtc canister
+          await LOKBTC.updateShare(Principal.toText(message.caller), (share.share -(amount_ + 10)), totalShares);
           var shr = {
             walletAddress = Principal.toText(message.caller);
             share = share.share - amount_;
           };
           sharesHash.put(Principal.toText(message.caller), shr);
-          //update totalshare and share to lokbtc canister
-          await LOKBTC.updateShare(Principal.toText(message.caller), (share.share -(amount_ + 10)), totalShares);
           var claimObject = {
             id = claimCKBTCId;
             amount = amount_;
@@ -855,6 +858,8 @@ shared ({ caller = owner }) actor class Miner({
           claimCKBTCId += 1;
           return #success(claimObject);
 
+        } else {
+          return #error("insufficient lokbtc");
         };
       };
       case (null) {
