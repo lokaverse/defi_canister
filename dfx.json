@@ -38,6 +38,11 @@
           "type": "motoko",
           "dependencies": ["ckbtc_prod"]
         },
+        "devpool": {
+          "main": "src/devpool/main.mo",
+          "type": "motoko",
+          "dependencies": ["ckbtc_test"]
+        },
 
         "ckbtc_prod" : {
           "type" : "custom",

@@ -26,10 +26,10 @@ import { setTimer; cancelTimer; recurringTimer } = "mo:base/Timer";
 
 import T "types";
 //import Minter "canister:ckbtc_minter";
-import CKBTC "canister:ckbtc_prod"; //PROD
-import DEFI "canister:defi";
+//import CKBTC "canister:ckbtc_prod"; //PROD
+//import DEFI "canister:defi";
 //import Minter "ic:mqygn-kiaaa-aaaar-qaadq-cai";
-//import CKBTC "canister:lbtc"; //DEV
+import CKBTC "canister:ckbtc_test"; //DEV
 //import LBTC "canister:lbtc";
 
 shared ({ caller = owner }) actor class Miner({
@@ -3020,9 +3020,9 @@ shared ({ caller = owner }) actor class Miner({
     //assert(_isAdmin(message.caller));
     distributing := true;
     let now_ = now();
-    var ckbtcb = await updateCKBTCBalance();
+    //var ckbtcb = await updateCKBTCBalance();
 
-    let url = "https://api.lokamining.com/calculatef2poolRewardV2?id=poolR" #Int.toText(now_);
+    let url = "https://api.lokamining.com/testReward?id=poolR" #Int.toText(now_);
     let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
       getCalculatedReward : (a : Text) -> async Text;
     };
@@ -3062,9 +3062,9 @@ shared ({ caller = owner }) actor class Miner({
     assert (_isAdmin(message.caller));
     //distributionStatus := "processing";
     let now_ = now();
-    var ckbtcb = await updateCKBTCBalance();
+    //var ckbtcb = await updateCKBTCBalance();
 
-    let url = "https://api.lokamining.com/calculatef2poolRewardV2?id=poolR" #Int.toText(now_);
+    let url = "https://api.lokamining.com/testReward?id=poolR" #Int.toText(now_);
     let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
       getCalculatedReward : (a : Text) -> async Text;
     };
@@ -3277,11 +3277,11 @@ shared ({ caller = owner }) actor class Miner({
     );
 
     var transferList = Iter.toArray(mptsTransferHash.entries());
-    for (transfer in transferList.vals()) {
+    /*for (transfer in transferList.vals()) {
       var q = await DEFI.distributeMPTS(transfer.1, transfer.0);
-    };
+    }; */
 
-    var o = await DEFI.distributeLPTS(mpts);
+    //var o = await DEFI.distributeLPTS(mpts);
     let tm = now() / 1000000;
     let d = [{ time = tm; data = rewards_ }];
     distributionHistoryList := Array.append<{ time : Int; data : Text }>(distributionHistoryList, d);
