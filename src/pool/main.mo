@@ -1593,6 +1593,253 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
+  /*
+ public shared (message) func callMinter() : async Text {
+    let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
+      get_btc_address : ({ subaccount : ?Nat }) -> async Text;
+    };
+    let result = await Minter.get_btc_address({ subaccount = null }); //"(record {subaccount=null;})"
+    btcAddress := result;
+    result;
+  };
+*/
+
+  public shared (message) func withdrawNativeBTC(username_ : Text, amount_ : Nat, address : Text) : async T.TransferRes {
+    assert (_isNotPaused());
+    assert (totalBalance > amount_);
+    //assert (_isAdmin(message.caller));
+    withdrawalIndex += 1;
+    //let addr = Principal.fromText(message.caller);
+    let amountNat_ : Nat = amount_;
+    let res_ = getMiner(message.caller);
+    var id_ = 0;
+    var uname = "";
+    switch (res_) {
+      case (#none) {
+        //return false;
+      };
+      case (#ok(m)) {
+        id_ := m.id;
+        uname := m.username;
+      };
+    };
+    //let miner_ = miners_[0];
+    var minerStatus_ : T.MinerStatus = minerStatus.get(id_);
+    if (minerStatus_.balance < (amount_ + 10)) {
+      return #error("insufficient balance to withdraw");
+    };
+
+    logTransaction(id_, "{\"action\":\"pre-withdraw BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+    minerStatus_.balance -= (amount_ + 10);
+    minerStatus_.totalWithdrawn += (amount_ + 10);
+    var tsr = minerStatus_.totalSharedRevenue;
+    if (minerStatus_.totalSharedRevenue > 0) {
+      if (minerStatus_.totalSharedRevenue > minerStatus_.balance) {
+        //minerStatus_.totalSharedRevenue := minerStatus_.balance;
+      };
+    };
+    switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+      case (?mStat) {
+
+        minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+      };
+      case (null) {
+
+      };
+    };
+
+    totalWithdrawn += (amount_ + 10);
+    totalBalance -= (amount_ + 10);
+
+    var tme = now() / 1000000;
+    var wdh : T.WithdrawalHistory = {
+      id = withdrawalIndex;
+      //caller: Text;
+      time = tme;
+      action = "PRE Withdraw BTC";
+      //receiver : Text;
+      amount = Nat.toText(amount_);
+      txid = "pre transfer";
+      currency = "BTC";
+      username = uname;
+      wallet = Principal.toText(message.caller);
+      jwalletId = "";
+      bankId = "BTC";
+      memo = null;
+      //provider : Text;
+    };
+
+    switch (withdrawalHash.get(Nat.toText(id_))) {
+      case (?withdrawals) {
+        var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+
+      };
+      case (null) {
+
+        var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+        //return #res(list);
+        wd.put(Int.toText(tme), wdh);
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+      };
+    };
+    var transferResult : T.Result = #Ok(0);
+    try {
+
+      /*
+      let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
+      get_btc_address : ({ subaccount : ?Nat }) -> async Text;
+    };
+    let result = await Minter.get_btc_address({ subaccount = null }); //"(record {subaccount=null;})"
+    btcAddress := result;
+    result;
+      */
+      transferResult := await CKBTC.icrc1_transfer({
+        amount = amount_;
+        fee = ?10;
+        created_at_time = null;
+        from_subaccount = null;
+        to = { owner = Principal.fromText(address); subaccount = null };
+        memo = null;
+      });
+      var res = 0;
+    } catch (error) {
+      minerStatus_.balance += (amount_ + 10);
+      minerStatus_.totalWithdrawn -= (amount_ + 10);
+      minerStatus_.totalSharedRevenue := tsr;
+      totalWithdrawn -= (amount_ + 10);
+      totalBalance += (amount_ + 10);
+      switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+        case (?mStat) {
+
+          minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+        };
+        case (null) {
+
+        };
+      };
+      logTransaction(id_, "{\"action\":\"crashed withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+
+      return #error("ckbtc cansiter rejects");
+    };
+
+    //var res = 0;
+    switch (transferResult) {
+      case (#Ok(number)) {
+
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "Withdraw CKBTC";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = Int.toText(number);
+          currency = "CKBTC";
+          username = uname;
+          wallet = Principal.toText(message.caller);
+          jwalletId = "";
+          bankId = "CKBTC";
+          memo = null;
+          //provider : Text;
+        };
+
+        switch (withdrawalHash.get(Nat.toText(id_))) {
+          case (?withdrawals) {
+            var wd = HashMap.fromIter<Text, T.WithdrawalHistory>(withdrawals.vals(), 1, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+
+          };
+          case (null) {
+
+            var wd = HashMap.HashMap<Text, T.WithdrawalHistory>(0, Text.equal, Text.hash);
+            //return #res(list);
+            wd.put(Int.toText(tme), wdh);
+            allWithdrawalHash.put(Int.toText(tme), wdh);
+            withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
+            allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
+          };
+        };
+        logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+
+        return #success(number);
+      };
+      case (#Err(msg)) {
+
+        var tme = now() / 1000000;
+        var errmsg = "";
+        Debug.print("transfer error  ");
+        switch (msg) {
+          case (#BadFee(number)) {
+            Debug.print("Bad Fee");
+            errmsg := "Bad Fee";
+          };
+          case (#GenericError(number)) {
+            Debug.print("err " #number.message);
+            errmsg := "err " #number.message;
+          };
+          case (#InsufficientFunds(number)) {
+            Debug.print("insufficient funds");
+            errmsg := "insufficient funds";
+          };
+          case _ {
+            Debug.print("err");
+            errmsg := "other";
+          };
+        };
+        //return #error(errmsg);
+        var wdh : T.WithdrawalHistory = {
+          id = withdrawalIndex;
+          //caller: Text;
+          time = tme;
+          action = "FAILED : Withdraw CKBTC";
+          //receiver : Text;
+          amount = Nat.toText(amount_);
+          txid = errmsg;
+          currency = "IDR";
+          username = uname;
+          wallet = Principal.toText(message.caller);
+          jwalletId = "";
+          bankId = "CKBTC";
+          memo = null;
+          //provider : Text;
+        };
+
+        minerStatus_.balance += (amount_ + 10);
+        minerStatus_.totalWithdrawn -= (amount_ + 10);
+        totalWithdrawn -= (amount_ + 10);
+        totalBalance += (amount_ + 10);
+        minerStatus_.totalSharedRevenue := tsr;
+        switch (minerStatusAndRewardHash.get(Nat.toText(id_))) {
+          case (?mStat) {
+
+            minerStatusAndRewardHash.put(Nat.toText(id_), minerStatus_);
+
+          };
+          case (null) {
+
+          };
+        };
+        allWithdrawalHash.put(Int.toText(tme), wdh);
+        failedWithdrawalHash.put(Int.toText(tme), wdh);
+        return #error(errmsg);
+      };
+    };
+    //logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "failed", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+
+    return #error("Other Error");
+  };
+
   public shared (message) func withdrawCKBTC(username_ : Text, amount_ : Nat, address : Text) : async T.TransferRes {
     assert (_isNotPaused());
     assert (totalBalance > amount_);
@@ -3058,8 +3305,9 @@ shared ({ caller = owner }) actor class Miner({
     return "done";
   };
 
-  public shared (message) func routine24Force() : async Text {
+  public shared (message) func routine24Force(confirm : Bool) : async Text {
     assert (_isAdmin(message.caller));
+    //return "ok";
     //distributionStatus := "processing";
     let now_ = now();
     var ckbtcb = await updateCKBTCBalance();
@@ -3070,10 +3318,12 @@ shared ({ caller = owner }) actor class Miner({
     };
     var hashrateRewards = "";
     var count_ = 0;
-    var dt = "1721692800000:159109:2101170690572634:ant8601/0/0|ant8602/19412067359/1|ant8603/16176722799/1|ant8604/9706033680/1|ant9001/22647411919/2|ant9002/9706033680/1|armancryptant/100709805460337/7572|armancryptant3/0/0|arwanagroup/95382810642474/7172|ava7501/0/0|ava7801/0/0|ava8701/0/0|dody85/238341279185323/18193|dragon/262727772658358/19755|john/38538375278889/2942|karmana01/71884980928516/5487|kucing/682213928641792/52018|kucinggendutter/0/0|rendysena/90413321398479/6798|silver/195272456256878/14683|yudakukuh/325608311852151/24483:23-Jul-2024-00-00-00";
+    //var dt = "";
+    var dt = "1728259200000:113100:1624100273381460:arman/181929895291881/12666|arwanagroup/55641803989926/3907|bersama/125052537928969/8706|dody85/226703372058511/15738|dragon/230013586141004/16014|john/168923282304597/11801|karmana/74788224846477/5207|kucing/289362746747674/20146|luthfimedy/156202435351615/10875|silver/115482388720806/8040:06-Oct-2024-00-00-00:1";
     try {
-      let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
-      hashrateRewards := result;
+      //let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
+      //hashrateRewards := result;
+      hashrateRewards := dt;
       //distributionStatus := "done";
     } catch e {
       //distributionStatus := "error";
@@ -3122,6 +3372,7 @@ shared ({ caller = owner }) actor class Miner({
     assert (message.caller == Principal.fromActor(this) or _isAdmin(message.caller));
     //format rewards_ : timestamp:reward:hashrate:user/hash/reward|:datetimestring
     let distributionData = textSplit(rewards_, ':');
+
     let timestamp_ = distributionData[0];
     switch (distributionHistoryByTimeStamp.get(timestamp_)) {
       case (?distributed) {
@@ -3557,6 +3808,90 @@ shared ({ caller = owner }) actor class Miner({
     assert (_isAdmin(message.caller));
     totalBalance := a;
     totalBalance;
+  };
+
+  //public shared (message) func setUsername(oldUsername : Text, newUserName :a : Nat) : async Nat {
+  public shared (message) func setUsername(uname : Text, newUsername : Text) : async {
+    #none : Nat;
+    #ok : T.MinerData;
+  } {
+
+    assert (_isAdmin(message.caller));
+
+    var yesterdayRevenue_ = 0;
+    var p = 0;
+    switch (usernameHash.get(uname)) {
+      case (?mid) {
+        p := mid;
+      };
+      case (null) {
+        return #none(0);
+      };
+    };
+
+    let miner_ = miners.get(p);
+    miner_.username := newUsername;
+    usernameHash.put(newUsername, p);
+    //usernameHas.put(Principal.fromText(miner_.walletAddress),newUserName);
+    let status_ = minerStatus.get(miner_.id);
+    var revenueHistory_ : [T.DistributionHistory] = [];
+    switch (revenueHash.get(Principal.toText(miner_.walletAddress))) {
+      case (?r) {
+        revenueHistory_ := r;
+        //let hist = Array.size(r);
+        if (Array.size(r) > 0) yesterdayRevenue_ := r[Array.size(r) -1].sats;
+      };
+      case (null) {
+
+      };
+    };
+
+    var currentShared = 0;
+    var shareList_ : [(Text, T.RevenueShare)] = [];
+    switch (revenueShareHash.get(miner_.username)) {
+      case (?list) {
+
+        for (shareItem in list.vals()) {
+          currentShared += shareItem.1.sharePercent;
+        };
+        shareList_ := list;
+      };
+      case (null) {
+        currentShared := 0;
+      };
+    };
+    var receivedShareList_ : [(Text, T.RevenueShare)] = [];
+    switch (receivedRevenueShareHash.get(miner_.username)) {
+      case (?list) {
+
+        receivedShareList_ := list;
+      };
+      case (null) {
+
+      };
+    };
+    let minerData : T.MinerData = {
+      id = miner_.id;
+      walletAddress = miner_.walletAddress;
+      walletAddressText = Principal.toText(miner_.walletAddress);
+      username = miner_.username;
+      hashrate = miner_.hashrate;
+      verified = status_.verified;
+      balance = status_.balance;
+      //balance = 100000000;
+      totalWithdrawn = status_.totalWithdrawn;
+      totalReceivedSharedRevenue = status_.totalSharedRevenue;
+      receivedShareList = receivedShareList_;
+      savedWalletAddress = status_.walletAddress;
+      bankAddress = status_.bankAddress;
+      transactions = status_.transactions;
+      revenueHistory = revenueHistory_;
+      yesterdayRevenue = yesterdayRevenue_;
+      totalSharedPercent = currentShared;
+      shareList = shareList_;
+    };
+    //Debug.print("fetched 3");
+    #ok(minerData);
   };
 
   //@DEV- CORE MINER VERIFICATION
