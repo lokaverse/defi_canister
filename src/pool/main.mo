@@ -875,6 +875,17 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
+  public shared (message) func estimateWithdrawalFee(amount : Nat64) : async Nat64 {
+    let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
+      estimate_withdrawal_fee : ({ amount : ?Nat64 }) -> async {
+        minter_fee : Nat64;
+        bitcoin_fee : Nat64;
+      };
+    };
+    let result = await Minter.estimate_withdrawal_fee({ amount = ?amount }); //"(record {subaccount=null;})"
+    return result.minter_fee + result.bitcoin_fee;
+  };
+
   //public shared(message) func getCKBTCMintAddress() : async Text {
   // var ckBTCBalance : Nat= (await CKBTC.icrc1_balance_of({owner=Principal.fromActor(this);subaccount=null}));
   //ckBTCBalance;
@@ -1578,6 +1589,16 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
+  public type RetrieveBtcWithApprovalError = {
+    #MalformedAddress : Text;
+    #GenericError : { error_message : Text; error_code : Nat64 };
+    #TemporarilyUnavailable : Text;
+    #InsufficientAllowance : { allowance : Nat64 };
+    #AlreadyProcessing;
+    #AmountTooLow : Nat64;
+    #InsufficientFunds : { balance : Nat64 };
+  };
+
   public shared (message) func getAllBalance() : async Nat {
     assert (_isAdmin(message.caller));
     var ls = Iter.toArray(usernameHash.entries());
@@ -1603,6 +1624,18 @@ shared ({ caller = owner }) actor class Miner({
     result;
   };
 */
+  public type RetrieveBtcOk = { block_index : Nat64 };
+
+  public type ApproveArgs = {
+    fee : ?Nat;
+    memo : ?Blob;
+    from_subaccount : ?Blob;
+    created_at_time : ?Nat64;
+    amount : Nat;
+    expected_allowance : ?Nat;
+    expires_at : ?Nat64;
+    spender : { owner : Principal; subaccount : ?Blob };
+  };
 
   public shared (message) func withdrawNativeBTC(username_ : Text, amount_ : Nat, address : Text) : async T.TransferRes {
     assert (_isNotPaused());
@@ -1629,7 +1662,7 @@ shared ({ caller = owner }) actor class Miner({
       return #error("insufficient balance to withdraw");
     };
 
-    logTransaction(id_, "{\"action\":\"pre-withdraw BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+    logTransaction(id_, "{\"action\":\"pre-withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
     minerStatus_.balance -= (amount_ + 10);
     minerStatus_.totalWithdrawn += (amount_ + 10);
     var tsr = minerStatus_.totalSharedRevenue;
@@ -1657,7 +1690,7 @@ shared ({ caller = owner }) actor class Miner({
       id = withdrawalIndex;
       //caller: Text;
       time = tme;
-      action = "PRE Withdraw BTC";
+      action = "PRE Withdraw Native BTC";
       //receiver : Text;
       amount = Nat.toText(amount_);
       txid = "pre transfer";
@@ -1688,26 +1721,54 @@ shared ({ caller = owner }) actor class Miner({
         withdrawalHash.put(Nat.toText(id_), Iter.toArray(wd.entries()));
       };
     };
-    var transferResult : T.Result = #Ok(0);
+    var transferResult : {
+      #Ok : RetrieveBtcOk;
+      #Err : RetrieveBtcWithApprovalError;
+    } = #Ok({ block_index = Nat64.fromNat(0) });
     try {
 
-      /*
-      let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
-      get_btc_address : ({ subaccount : ?Nat }) -> async Text;
-    };
-    let result = await Minter.get_btc_address({ subaccount = null }); //"(record {subaccount=null;})"
-    btcAddress := result;
-    result;
-      */
-      transferResult := await CKBTC.icrc1_transfer({
-        amount = amount_;
-        fee = ?10;
-        created_at_time = null;
-        from_subaccount = null;
-        to = { owner = Principal.fromText(address); subaccount = null };
-        memo = null;
-      });
-      var res = 0;
+      //approve
+      try {
+        var app = await CKBTC.icrc2_approve({
+          fee = ?10;
+          memo = null;
+          from_subaccount = null;
+          created_at_time = null;
+          amount = amount_;
+          expected_allowance = null;
+          expires_at = null;
+          spender = {
+            owner = Principal.fromText("mqygn-kiaaa-aaaar-qaadq-cai");
+            subaccount = null;
+          };
+        });
+      } catch (e) {
+        return #error("approval error");
+      };
+
+      //retrieve
+      try {
+        let Minter = actor ("mqygn-kiaaa-aaaar-qaadq-cai") : actor {
+          retrieve_btc_with_approval : ({
+            address : Text;
+            amount : Nat64;
+            from_subaccount : ?Blob;
+          }) -> async {
+            #Ok : RetrieveBtcOk;
+            #Err : RetrieveBtcWithApprovalError;
+          };
+
+        };
+
+        transferResult := await Minter.retrieve_btc_with_approval({
+          address = address;
+          amount = Nat64.fromNat(amount_);
+          from_subaccount = null;
+        });
+      } catch (e) {
+        return #error("native btc minter retrieve rejects");
+      };
+      //var res = 0;
     } catch (error) {
       minerStatus_.balance += (amount_ + 10);
       minerStatus_.totalWithdrawn -= (amount_ + 10);
@@ -1724,15 +1785,15 @@ shared ({ caller = owner }) actor class Miner({
 
         };
       };
-      logTransaction(id_, "{\"action\":\"crashed withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+      logTransaction(id_, "{\"action\":\"crashed withdraw native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
 
-      return #error("ckbtc cansiter rejects");
+      return #error("native btc cansiter rejects");
     };
 
     //var res = 0;
     switch (transferResult) {
-      case (#Ok(number)) {
-
+      case (#Ok(number_)) {
+        var number = Nat64.toNat(number_.block_index);
         var wdh : T.WithdrawalHistory = {
           id = withdrawalIndex;
           //caller: Text;
@@ -1770,7 +1831,7 @@ shared ({ caller = owner }) actor class Miner({
             allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
           };
         };
-        logTransaction(id_, "{\"action\":\"withdraw CKBTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+        logTransaction(id_, "{\"action\":\"withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
 
         return #success(number);
       };
@@ -1780,17 +1841,21 @@ shared ({ caller = owner }) actor class Miner({
         var errmsg = "";
         Debug.print("transfer error  ");
         switch (msg) {
-          case (#BadFee(number)) {
-            Debug.print("Bad Fee");
-            errmsg := "Bad Fee";
+          case (#MalformedAddress(err)) {
+            Debug.print("Malformed address " #err);
+            errmsg := "Malformed address " #err;
           };
           case (#GenericError(number)) {
-            Debug.print("err " #number.message);
-            errmsg := "err " #number.message;
+            Debug.print("err " #number.error_message);
+            errmsg := "err " #number.error_message;
           };
           case (#InsufficientFunds(number)) {
             Debug.print("insufficient funds");
             errmsg := "insufficient funds";
+          };
+          case (#InsufficientAllowance(number)) {
+            Debug.print("insufficient allowance");
+            errmsg := "insufficient allowance";
           };
           case _ {
             Debug.print("err");
@@ -1802,15 +1867,15 @@ shared ({ caller = owner }) actor class Miner({
           id = withdrawalIndex;
           //caller: Text;
           time = tme;
-          action = "FAILED : Withdraw CKBTC";
+          action = "FAILED : Withdraw Native BTC";
           //receiver : Text;
           amount = Nat.toText(amount_);
           txid = errmsg;
-          currency = "IDR";
+          currency = "BTC";
           username = uname;
           wallet = Principal.toText(message.caller);
           jwalletId = "";
-          bankId = "CKBTC";
+          bankId = "BTC";
           memo = null;
           //provider : Text;
         };
@@ -3319,7 +3384,7 @@ shared ({ caller = owner }) actor class Miner({
     var hashrateRewards = "";
     var count_ = 0;
     //var dt = "";
-    var dt = "1728259200000:113100:1624100273381460:arman/181929895291881/12666|arwanagroup/55641803989926/3907|bersama/125052537928969/8706|dody85/226703372058511/15738|dragon/230013586141004/16014|john/168923282304597/11801|karmana/74788224846477/5207|kucing/289362746747674/20146|luthfimedy/156202435351615/10875|silver/115482388720806/8040:06-Oct-2024-00-00-00:1";
+    var dt = "1729386000000:11358:155195659013024:yudakukuh/155195659013024/11358:20-Oct-2024-01-00-00:1";
     try {
       //let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
       //hashrateRewards := result;
