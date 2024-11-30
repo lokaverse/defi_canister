@@ -399,19 +399,36 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   func getNextTimeStamp(tm_ : Int) : async Nat {
-    Debug.print("getting next timestamp");
-    let tmn_ = tm_;
-    let url = "https://api.lokamining.com/nextTimeStamp?timestamp=" #Int.toText(tmn_);
-    try {
-      let decoded_text = await send_http(url);
-      Debug.print(decoded_text);
-      return textToNat(decoded_text);
-    } catch (e) {
-      return 0;
-    };
+    // Debug.print("getting next timestamp");
+    // let tmn_ = tm_;
+    // let url = "https://api.lokamining.com/nextTimeStamp?timestamp=" #Int.toText(tmn_);
+    // try {
+    //   let decoded_text = await send_http(url);
+    //   Debug.print(decoded_text);
+    //   return textToNat(decoded_text);
+    // } catch (e) {
+    //   return 0;
+    // };
 
     //return 0;
 
+    return _nextDayTimestamp(5, 0, 0); // next day at 05:00 UTC or 12:00 WIB
+  };
+
+  func _nextDayTimestamp(hour : Nat, minute : Nat, second : Nat) : Nat {
+    assert hour >= 0 and hour < 24;
+    assert minute >= 0 and minute < 60;
+    assert second >= 0 and second < 60;
+
+    let oneDayInMilliseconds = 86_400_000;
+    let oneHourInMilliseconds = 3_600_000;
+    let oneMinuteInMilliseconds = 60_000;
+    let oneSecondInMilliseconds = 1_000;
+    let today = Int.abs(now() / 1_000_000);
+    let firstOfDay = Int.abs(today - (today % oneDayInMilliseconds)); // now at 00:00:00 UTC
+    let nextDay = firstOfDay + oneDayInMilliseconds; // next day at 00:00:00 UTC
+
+    return nextDay + (hour * oneHourInMilliseconds) + (minute * oneMinuteInMilliseconds) + (second * oneSecondInMilliseconds);
   };
 
   public shared (message) func clearData() : async () {
