@@ -236,9 +236,10 @@ shared ({ caller = owner }) actor class Miner({
     return decoded_text;
   };
 
-  public shared (message) func getNext() : async Int {
+  public shared (message) func getNext() : async {now : Int; next :Int} {
     assert (_isAdmin(message.caller));
-    nextTimeStamp;
+    var n = now()/1000000;
+   return {now = n; next = nextTimeStamp};
     //return 0;
 
   };
@@ -376,6 +377,7 @@ shared ({ caller = owner }) actor class Miner({
     schedulerId := recurringTimer(
       #seconds(900),
       func() : async () {
+        distributionStatus := "reattempting ";
         if (counter < 800) { counter += 10 } else { counter := 700 };
         let time_ = now() / 1000000;
         if (time_ >= nextTimeStamp) {
@@ -386,9 +388,10 @@ shared ({ caller = owner }) actor class Miner({
           //schedulerSecondsInterval := 24 * 60 * 60;
           if (res == "done") {
             let t_ = now() / 1000000;
+            distributionStatus := "none";
             let i = await initScheduler(t_, false);
             //nextTimeStamp := time_ + (24 * 60 * 60 * 1000);
-            distributionStatus := "none";
+            
           };
           //};
           //cancelTimer(schedulerId);
@@ -446,7 +449,7 @@ shared ({ caller = owner }) actor class Miner({
   };
 
   func getNextTimeStamp(tm_ : Int) : async Nat {
-    Debug.print("getting next timestamp");
+    /*Debug.print("getting next timestamp");
     let tmn_ = tm_;
     let url = "https://api.lokamining.com/nextTimeStamp?timestamp=" #Int.toText(tmn_);
     try {
@@ -455,10 +458,25 @@ shared ({ caller = owner }) actor class Miner({
       return textToNat(decoded_text);
     } catch (e) {
       return 0;
-    };
+    }; */
 
-    //return 0;
+    return _nextDayTimestamp(5, 1, 0); // next day at 05:00 UTC or 12:00 WIB
+  };
 
+  func _nextDayTimestamp(hour : Nat, minute : Nat, second : Nat) : Nat {
+    assert hour >= 0 and hour < 24;
+    assert minute >= 0 and minute < 60;
+    assert second >= 0 and second < 60;
+
+    let oneDayInMilliseconds = 86_400_000;
+    let oneHourInMilliseconds = 3_600_000;
+    let oneMinuteInMilliseconds = 60_000;
+    let oneSecondInMilliseconds = 1_000;
+    let today = Int.abs(now() / 1_000_000);
+    let firstOfDay = Int.abs(today - (today % oneDayInMilliseconds)); // now at 00:00:00 UTC
+    let nextDay = firstOfDay + oneDayInMilliseconds; // next day at 00:00:00 UTC
+
+    return nextDay + (hour * oneHourInMilliseconds) + (minute * oneMinuteInMilliseconds) + (second * oneSecondInMilliseconds);
   };
 
   public shared (message) func clearData() : async () {
@@ -1265,9 +1283,13 @@ shared ({ caller = owner }) actor class Miner({
 
   };
 
-  public shared (message) func getErrorLogs() : async [(Text, T.ErrorLog)] {
+  public shared (message) func getErrorLogs(delete : Bool) : async [(Text, T.ErrorLog)] {
     assert (_isAdmin(message.caller));
-    return Iter.toArray(errorHash.entries());
+    var logs = Iter.toArray(errorHash.entries());
+    if (delete) {
+      errorHash := HashMap.HashMap<Text, T.ErrorLog>(0, Text.equal, Text.hash);
+    };
+    return logs;
   };
 
   public shared (message) func getAllWithdrawals() : async [(Text, T.WithdrawalHistory)] {
@@ -1662,7 +1684,7 @@ shared ({ caller = owner }) actor class Miner({
       return #error("insufficient balance to withdraw");
     };
 
-    logTransaction(id_, "{\"action\":\"pre-withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+    logTransaction(id_, "{\"action\":\"pre-withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"BTC\",\"chain\":\"BTC\"}", uname, Principal.toText(message.caller));
     minerStatus_.balance -= (amount_ + 10);
     minerStatus_.totalWithdrawn += (amount_ + 10);
     var tsr = minerStatus_.totalSharedRevenue;
@@ -1785,7 +1807,7 @@ shared ({ caller = owner }) actor class Miner({
 
         };
       };
-      logTransaction(id_, "{\"action\":\"crashed withdraw native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+      logTransaction(id_, "{\"action\":\"crashed withdraw native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), "pre transfer", "{\"currency\":\"BTC\",\"chain\":\"BTC\"}", uname, Principal.toText(message.caller));
 
       return #error("native btc cansiter rejects");
     };
@@ -1798,15 +1820,15 @@ shared ({ caller = owner }) actor class Miner({
           id = withdrawalIndex;
           //caller: Text;
           time = tme;
-          action = "Withdraw CKBTC";
+          action = "Withdraw Native BTC";
           //receiver : Text;
           amount = Nat.toText(amount_);
           txid = Int.toText(number);
-          currency = "CKBTC";
+          currency = "BTC";
           username = uname;
           wallet = Principal.toText(message.caller);
           jwalletId = "";
-          bankId = "CKBTC";
+          bankId = "BTC";
           memo = null;
           //provider : Text;
         };
@@ -1831,7 +1853,7 @@ shared ({ caller = owner }) actor class Miner({
             allSuccessfulWithdrawalHash.put(Int.toText(tme), wdh);
           };
         };
-        logTransaction(id_, "{\"action\":\"withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"CKBTC\",\"chain\":\"ICP\"}", uname, Principal.toText(message.caller));
+        logTransaction(id_, "{\"action\":\"withdraw Native BTC\",\"receiver\":\"" #address # "\"}", Nat.toText(amount_), Nat.toText(number), "{\"currency\":\"BTC\",\"chain\":\"BTC\"}", uname, Principal.toText(message.caller));
 
         return #success(number);
       };
@@ -1857,9 +1879,18 @@ shared ({ caller = owner }) actor class Miner({
             Debug.print("insufficient allowance");
             errmsg := "insufficient allowance";
           };
+          case (#AmountTooLow(number)) {
+            Debug.print("amount too low");
+            errmsg := "amount too low";
+          };
+          case (#AlreadyProcessing) {
+            Debug.print("already processing");
+            errmsg := "already processing";
+          };
+
           case _ {
             Debug.print("err");
-            errmsg := "other";
+            errmsg := "other error";
           };
         };
         //return #error(errmsg);
@@ -3306,6 +3337,10 @@ shared ({ caller = owner }) actor class Miner({
     return f;
   };
 
+  public query(message) func getDistributionStatus () : async Text {
+    return distributionStatus;
+  };
+
   public shared (message) func setBalance(b : Nat) : async Bool {
     //let miner_ = getMiner(message.caller);
     let res_ = getMiner(message.caller);
@@ -3384,14 +3419,14 @@ shared ({ caller = owner }) actor class Miner({
     var hashrateRewards = "";
     var count_ = 0;
     //var dt = "";
-    var dt = "1729386000000:11358:155195659013024:yudakukuh/155195659013024/11358:20-Oct-2024-01-00-00:1";
+    //var dt = "1729386000000:11358:155195659013024:yudakukuh/155195659013024/11358:20-Oct-2024-01-00-00:1";
     try {
-      //let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
-      //hashrateRewards := result;
-      hashrateRewards := dt;
-      //distributionStatus := "done";
+      let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
+      hashrateRewards := result;
+      //hashrateRewards := "1744675200000:82313:1614951414628658:arman/98576873635740/5068|arwanagroup/37711176190108/1896|cuancuan/525294458873608/27007|dody85/233200670976052/11990|dragon/250422139624807/12588|john/121483228384078/6085|luthfimedy/152050338635554/7817|silver/109725297533662/5515|sugiono/86487230775049/4347:15-Apr-2025-00-00-00:1";
+      distributionStatus := "done";
     } catch e {
-      //distributionStatus := "error";
+      distributionStatus := "error";
       //let r_ = await reattempt();
       //return "reject";
       return "error";
@@ -3399,15 +3434,91 @@ shared ({ caller = owner }) actor class Miner({
 
     logDistribution(0, "Distribute", hashrateRewards, "", "");
 
-    //let hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
+    //let  hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
     var a = await distributeMiningRewards(hashrateRewards);
 
     //return "done";
-    //nextTimeStamp := now_ / 1000000 + (24 * 60 * 60 * 1000);
+    if (a == "done" and confirm == true) nextTimeStamp := nextTimeStamp + (24 * 60 * 60 * 1000);
     let t_ = now() / 1000000;
     var ad = await initScheduler(t_, false);
 
     return hashrateRewards # " " #a;
+  };
+
+  public shared (message) func routineString(hashdata : Text) : async Text {
+    assert (_isAdmin(message.caller));
+    //return "ok";
+    //distributionStatus := "processing";
+    let now_ = now();
+    var ckbtcb = await updateCKBTCBalance();
+
+    let url = "https://api.lokamining.com/calculatef2poolRewardV2?id=poolR" #Int.toText(now_);
+    let LokaMiner = actor ("rfrec-ciaaa-aaaam-ab4zq-cai") : actor {
+      getCalculatedReward : (a : Text) -> async Text;
+    };
+    var hashrateRewards = "";
+    var count_ = 0;
+    //var dt = "";
+    //var dt = "1729386000000:11358:155195659013024:yudakukuh/155195659013024/11358:20-Oct-2024-01-00-00:1";
+    try {
+      //let result = await LokaMiner.getCalculatedReward(url); //"(record {subaccount=null;})"
+      hashrateRewards := hashdata;
+      //hashrateRewards := "1744675200000:82313:1614951414628658:arman/98576873635740/5068|arwanagroup/37711176190108/1896|cuancuan/525294458873608/27007|dody85/233200670976052/11990|dragon/250422139624807/12588|john/121483228384078/6085|luthfimedy/152050338635554/7817|silver/109725297533662/5515|sugiono/86487230775049/4347:15-Apr-2025-00-00-00:1";
+      distributionStatus := "done";
+    } catch e {
+      distributionStatus := "error";
+      //let r_ = await reattempt();
+      //return "reject";
+      return "error";
+    };
+
+    logDistribution(0, "Distribute", hashrateRewards, "", "");
+
+    //let  hashrateRewards = "rantai1-lokabtc/1361772;rantai2-lokabtc/1356752;";
+    var a = await distributeMiningRewards(hashrateRewards);
+
+    //return "done";
+   // if (a == "done" and confirm == true) nextTimeStamp := nextTimeStamp + (24 * 60 * 60 * 1000);
+    let t_ = now() / 1000000;
+    var ad = await initScheduler(t_, false);
+
+    return hashrateRewards # " " #a;
+  };
+
+  public shared (message) func distributeDailyMinerReward(distributionString : Text) : async Text {
+    if (_isAdmin(message.caller) == false){
+      assert(Principal.toText(message.caller) == "jcz4j-ldjzu-xcxek-hfrtr-43rh4-6gio4-detep-iwq3x-ikndd-gpzdl-iqe");
+    };
+
+    // Parse and validate checkFlag
+    let distributionData = textSplit(distributionString, ':');
+
+    // Validate array size
+    if (Array.size(distributionData) < 6) {
+      return "Invalid distribution string format";
+    };
+
+    let checkFlag = distributionData[5];
+
+    // Validate checkFlag - must be "1"
+    if (checkFlag != "1") {
+      return "Invalid check flag - distribution aborted";
+    };
+
+    // Update ckBTC balance
+    var ckbtcb = await updateCKBTCBalance();
+
+    // Set status
+    distributionStatus := "done";
+
+    // Log distribution
+    logDistribution(0, "Distribute Daily Reward", distributionString, "", "");
+
+    // Call the existing distribution logic
+    var a = await distributeMiningRewards(distributionString);
+
+    // Return result
+    return distributionString # " " #a;
   };
 
   public shared (message) func specialReward(hashrateData : Text) : async Text {
@@ -3491,7 +3602,7 @@ shared ({ caller = owner }) actor class Miner({
               var totalSharedHash = 0;
               var totalSharedMPTS = 0;
               Debug.print("miner username : " #username # " " #miner.username);
-              if (username == miner.username # "") {
+              if (toLower(username) == toLower(miner.username) # "") {
                 Debug.print("distributing " #Nat.toText(reward));
                 switch (revenueShareHash.get(miner.username)) {
                   case (?list) {
@@ -3594,16 +3705,17 @@ shared ({ caller = owner }) actor class Miner({
 
     var transferList = Iter.toArray(mptsTransferHash.entries());
     for (transfer in transferList.vals()) {
-      var q = await DEFI.distributeMPTS(transfer.1, transfer.0);
+      //var q = await DEFI.distributeMPTS(transfer.1, transfer.0);
     };
 
-    var o = await DEFI.distributeLPTS(mpts);
+    // var o = await DEFI.distributeLPTS(mpts);
     let tm = now() / 1000000;
     let d = [{ time = tm; data = rewards_ }];
     distributionHistoryList := Array.append<{ time : Int; data : Text }>(distributionHistoryList, d);
     lastF2poolCheck := tm;
     return "done";
   };
+
 
   public shared (message) func undoDistribution(rewards__ : Text) : async Text {
     assert (_isAdmin(message.caller));
@@ -3967,7 +4079,7 @@ shared ({ caller = owner }) actor class Miner({
     //var isValid = Text.contains(decoded_text, #text hashText);
     var isValid = true;
     if (isValid) {
-      let miner_ = addMiner(uname, hash_, message.caller);
+      let miner_ = addMiner(toLower(uname), hash_, message.caller);
     };
     isValid;
 
